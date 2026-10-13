@@ -1,6 +1,6 @@
 /* Garten Flo · Büro — Offline-Speicher
    Netz zuerst (Updates kommen sofort an), ohne Netz die zuletzt geladene Version. */
-const CACHE = 'buero-v8';
+const CACHE = 'buero-v9';
 const CORE = ['buero.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
 
 self.addEventListener('install', e => {

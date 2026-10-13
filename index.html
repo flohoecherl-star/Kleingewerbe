@@ -8290,7 +8290,7 @@ function vGeld(){
       <div><span class="lbl">Offen</span><b style="color:${over.length?'var(--red)':'var(--txt)'}">${eur(sum(open,i=>offenOf(i)))}</b></div></div>
     ${chart12(y)}
   </div>
-  ${gaps.length?`<div class="warn"><b>Lücke im Rechnungsnummernkreis:</b> ${gaps.join(', ')}. Storno-Rechnungen nie löschen.</div>`:''}
+  ${gaps.length?`<div class="warn"><b>Lücke im Rechnungsnummernkreis:</b> ${gaps.join(', ')}. Storno-Rechnungen nie löschen.<div style="margin-top:8px"><button class="btn sm" onclick="nrKreis()">Rechnungsnummern ansehen</button></div></div>`:''}
   ${dupes.length?`<div class="warn"><b>Rechnungsnummer doppelt:</b> ${dupes.join(', ')}<div style="margin-top:8px"><button class="btn sm" onclick="dupFix()">Jetzt beheben</button></div></div>`:''}
   <div class="card">
     <div class="row between"><span class="lbl">Kleinunternehmer § 19 UStG</span><span class="hint mono">${eur(inc)} / 25.000 €</span></div>
@@ -8367,6 +8367,7 @@ function vMehr(){
   <div class="mgrp">Einstellungen</div>
   <div class="v5list">
     ${r('','gear','Firmendaten','Nummernkreise und Vorgaben','editSettings()')}
+    ${r('','doc','Rechnungsnummern','Nächste: '+esc(db.settings.numbers.invPrefix+db.settings.numbers.invNext),'nrKreis()')}
     ${r('','paint','Darstellung & Ziele',themePref()==='auto'?'Automatisch':themePref()==='light'?'Hell':'Dunkel','openPrefs()')}
     ${r('','mail','E-Mail-Vorlagen','Rechnung, Angebot, Mahnung','editMail()')}
     ${r('','doc','E-Rechnung',{firmen:'ZUGFeRD für Firmenkunden',immer:'ZUGFeRD in jedem PDF',nie:'aus'}[einv().mode],'openEinv()')}
@@ -9701,6 +9702,133 @@ function dupStorno(id){
   if(!d.storniertDurch)return;
   setTimeout(()=>{if(confirm(`Storno erstellt. Jetzt die Rechnung an ${cust(d.customerId).name} mit neuer Nummer neu ausstellen?`))dupDoc('invoice',id);},400);
 }
+
+/* =====================================================================
+   NUMMERNKREIS
+   - Zähler springt nie mehr auf die höchste vorhandene Nummer, sondern
+     überspringt nur Nummern, die schon vergeben sind (invSkip).
+   - Wahlweise Jahresnummern: RE-26001, RE-26002 … ab Januar RE-27001.
+   - Große Sprünge sind Nummernkreis-Wechsel, keine Lücken; Wechsel und
+     Umnummerierungen werden in numbers.protokoll festgehalten.
+   ===================================================================== */
+const NK_SPRUNG=50;
+function nkJJ(){return new Date().getFullYear()%100;}
+function invTaken(){const t=new Set();db.invoices.forEach(i=>{if(!i.draft)t.add(String(i.number));});return t;}
+function invJahrCheck(){
+  const nk=db.settings.numbers;if(!nk||!nk.invJahr)return;
+  const start=nkJJ()*1000+1;
+  if(+nk.invNext<start||+nk.invNext>=start+999){nk.invNext=start;if(nk.invSetTs)nkLog('Neues Jahr: Rechnungsnummern starten mit '+nk.invPrefix+start);}
+}
+function invSkip(){
+  const nk=db.settings.numbers;if(!nk)return;
+  invJahrCheck();
+  const t=invTaken();let k=Math.max(1,+nk.invNext||1);
+  while(t.has(nk.invPrefix+k))k++;
+  nk.invNext=k;
+}
+function nkLog(text){const nk=db.settings.numbers;nk.protokoll=(nk.protokoll||[]).concat([{ts:Date.now(),text}]);}
+const _saveNk=save;
+save=async function(){try{invSkip();}catch(e){console.warn(e);}return _saveNk.apply(this,arguments);};
+function nrFrei(){invSkip();const nk=db.settings.numbers;return nk.invPrefix+nk.invNext;}
+
+function healCounters(rem){
+  const n=db.settings.numbers;
+  const rn=(rem.data&&rem.data.settings&&rem.data.settings.numbers)||{};
+  ['offNext','custNext'].forEach(k=>n[k]=Math.max(+n[k]||0,+rn[k]||0));
+  const a=n.invSetTs||0,b=rn.invSetTs||0;
+  if(b>a){n.invNext=+rn.invNext||n.invNext;n.invSetTs=b;n.invJahr=!!rn.invJahr;}
+  else if(a===b)n.invNext=Math.max(+n.invNext||0,+rn.invNext||0);
+  const hoechste=(arr,pre)=>arr.reduce((m,d)=>{
+    if(d.draft)return m;
+    const v=parseInt(String(d.number||'').replace(pre,'').replace(/\D/g,''),10)||0;return v>m?v:m;},0);
+  n.offNext=Math.max(n.offNext,hoechste(db.offers||[],n.offPrefix)+1);
+  n.custNext=Math.max(n.custNext,(db.customers||[]).reduce((m,c)=>Math.max(m,+c.number||0),0)+1);
+  invSkip();
+}
+
+/* Nummern des Präfixes, sortiert, mit Rechnung */
+function nkListe(){
+  const p=db.settings.numbers.invPrefix;
+  return db.invoices.filter(i=>!i.draft&&String(i.number||'').startsWith(p))
+    .map(i=>({i,n:+String(i.number).slice(p.length)})).filter(x=>Number.isInteger(x.n)&&x.n>0).sort((a,b)=>a.n-b.n);
+}
+/* Blöcke: getrennt an Sprüngen > NK_SPRUNG */
+function nkBloecke(){
+  const L=nkListe(),B=[];
+  L.forEach((x,k)=>{if(!k||x.n-L[k-1].n>NK_SPRUNG)B.push([]);B[B.length-1].push(x);});
+  return B;
+}
+/* echte Lücken: nur innerhalb eines Blocks und unterhalb des Zählers */
+function numberGaps(){
+  const nk=db.settings.numbers,p=nk.invPrefix,y=new Date().getFullYear(),g=[];
+  nkBloecke().forEach(b=>{
+    const ns=[...new Set(b.filter(x=>+String(x.i.date).slice(0,4)>=y-1).map(x=>x.n))];
+    for(let i=1;i<ns.length&&g.length<12;i++)for(let k=ns[i-1]+1;k<ns[i]&&g.length<12;k++)g.push(p+k);
+  });
+  return g;
+}
+/* Ist der Nummernkreis schon festgelegt? Sonst bei Sprung nachfragen */
+function nkOffen(){const nk=db.settings.numbers;return !nk.invSetTs&&nkBloecke().length>1;}
+
+function nkWahl(mode,quiet){
+  const nk=db.settings.numbers,B=nkBloecke(),alt=nk.invPrefix+nk.invNext;
+  if(mode==='jahr'){nk.invJahr=true;nk.invNext=nkJJ()*1000+1;}
+  else{nk.invJahr=false;const b0=B[0]||[];nk.invNext=b0.length?b0[b0.length-1].n+1:+nk.invNext;}
+  invSkip();
+  nk.invSetTs=Date.now();
+  nkLog(`Nummernkreis gewechselt: nächste Rechnung ${nk.invPrefix+nk.invNext} statt ${alt}`+(mode==='jahr'?' (Jahresnummern)':' (fortlaufend)')+'. Keine Rechnung gelöscht.');
+  save();if(quiet)return;render();nkDraw();toast('Nächste Rechnung: '+nk.invPrefix+nk.invNext);
+}
+function nkNeu(id){
+  const d=db.invoices.find(x=>x.id===id);if(!d)return;
+  const nr=nrFrei(),c=cust(d.customerId);
+  if(!confirm(`Rechnung ${d.number} an ${c.name} (${dDE(d.date)}, ${eur(totals(d).gross)}) bekommt die Nummer ${nr}.\n\nNur machen, wenn der Kunde diese Rechnung noch nicht hat, oder wenn du sie ihm mit der neuen Nummer noch einmal schickst.\n\nDie alte Nummer wird an der Rechnung vermerkt.`))return;
+  const alt=d.number;
+  d.nrKorrektur=(d.nrKorrektur||[]).concat([{ts:Date.now(),alt,neu:nr,grund:'Nummernkreis'}]);
+  db.fahrten.filter(f=>f.invoiceId===d.id&&f.anlass).forEach(f=>f.anlass=f.anlass.split(alt).join(nr));
+  d.number=nr;db.settings.numbers.invNext++;
+  nkLog(`Rechnung ${alt} umnummeriert in ${nr} (noch nicht beim Kunden).`);
+  save();render();refreshOpenViews();nkDraw();toast('Neue Nummer '+nr);
+}
+let _nkEl=null;
+function nkDraw(){if(_nkEl&&_nkEl.isConnected&&_nkEl.__redraw)_nkEl.__redraw();}
+function nrKreis(){
+  const el=sheet('Rechnungsnummern','<div id="nkb"></div>');el.dataset.nodirty='1';_nkEl=el;
+  const draw=()=>{
+    invSkip();
+    const nk=db.settings.numbers,p=nk.invPrefix,B=nkBloecke(),L=nkListe(),last=[...L].sort((a,b)=>(a.i.date+(a.i.created||''))<(b.i.date+(b.i.created||''))?1:-1)[0];
+    const jahrNr=p+(nkJJ()*1000+1),b0=B[0]||[],fortNr=p+(b0.length?b0[b0.length-1].n+1:nk.invNext);
+    const spr=B.slice(1).map((b,k)=>({von:B[k][B[k].length-1],bis:b[0],block:b}));
+    /* Ausreißer: Blöcke nach dem ersten, die nicht zum gewählten Kreis gehören */
+    const jj=nkJJ(),aus=spr.flatMap(s=>s.block).filter(x=>nk.invJahr?x.n<10000:true);
+    const card=(on,t,s,fn)=>`<button class="it n2" onclick="${fn}" style="${on?'outline:2px solid var(--moss);outline-offset:-2px':''}"><div style="min-width:0"><div class="nm">${t}</div><div class="mt">${s}</div></div><span class="r">${on?'<span class="ptag b">aktiv</span>':'<span class="v5car">›</span>'}</span></button>`;
+    el.querySelector('#nkb').innerHTML=`
+    <div class="card"><div class="row between"><span class="lbl">Nächste Rechnung</span><b class="mono">${esc(p+nk.invNext)}</b></div>
+      ${last?`<div class="hint">Zuletzt: ${esc(last.i.number)} vom ${dDE(last.i.date)} (${esc(cust(last.i.customerId).name)})</div>`:''}</div>
+    ${spr.length?`<div class="info">Deine Nummern springen ${spr.map(s=>`von <b>${esc(s.von.i.number)}</b> (${dDE(s.von.i.date)}) auf <b>${esc(s.bis.i.number)}</b> (${dDE(s.bis.i.date)})`).join(' und ')}. Das ist keine verbotene Lücke, solange keine Rechnung gelöscht wurde. Wähle unten, wie es weitergeht; die App vermerkt den Wechsel.</div>`:''}
+    <div class="mgrp">So geht es weiter</div>
+    <div class="v5list">
+      ${card(!!nk.invJahr&&!!nk.invSetTs,'Mit Jahr: '+esc(jahrNr)+', '+esc(p+(jahrNr.slice(p.length)*1+1)),'Ab Januar automatisch '+esc(p+((jj+1)%100*1000+1))+'. Bis 999 Rechnungen im Jahr.',"nkWahl('jahr')")}
+      ${b0.length&&(spr.length||!nk.invJahr)?card(!nk.invJahr&&!!nk.invSetTs,'Fortlaufend: '+esc(fortNr),'Weiter mit deiner alten Reihe ab '+esc(b0[b0.length-1].i.number)+'.',"nkWahl('fort')"):''}
+    </div>
+    ${nk.invSetTs&&aus.length?`<div class="mgrp">Nummern außerhalb der Reihe · ${aus.length}</div>
+      <div class="hint" style="margin:0 2px 8px">Hat der Kunde die Rechnung <b>noch nicht</b>: „Neue Nummer“. Hat er sie schon: einfach so lassen, sie bleibt gültig.</div>
+      ${aus.map(x=>{const d=x.i,c=cust(d.customerId),st=statusOf(d);return `<div class="card" style="--stripe:var(--clay)">
+        <div class="row between"><b>${esc(d.number)} · ${esc(c.name)}</b><span class="mono" style="font-weight:800">${eur(totals(d).gross)}</span></div>
+        <div class="hint">vom ${dDE(d.date)} · ${({bezahlt:'bezahlt',offen:'offen',faellig:'überfällig',teilbezahlt:'teilweise bezahlt'})[st]||st}</div>
+        <div class="v5btns" style="margin-top:10px"><button class="btn sm" onclick="viewDoc('invoice','${d.id}')">Ansehen</button>
+        <button class="btn sm" style="white-space:nowrap" onclick="nkNeu('${d.id}')">Neu: ${esc(nrFrei())}</button></div></div>`;}).join('')}`:''}
+    ${(nk.protokoll||[]).length?`<div class="mgrp">Protokoll</div><div class="card">${nk.protokoll.slice().reverse().map(e=>`<div class="hint" style="margin:3px 0">${dDE(new Date(e.ts).toISOString().slice(0,10))}: ${esc(e.text)}</div>`).join('')}</div>`:''}`;
+  };
+  el.__redraw=draw;draw();
+}
+
+/* Florian hat am 13.10.2026 „Mit Jahr“ gewählt: einmalig umstellen */
+const _v5InitNk=v5Init;
+v5Init=function(){
+  try{const nk=db.settings.numbers;if(!nk.invSetTs){nkWahl('jahr',true);setTimeout(()=>toast('Rechnungsnummern ab jetzt mit Jahr: '+nk.invPrefix+nk.invNext),1500);}else invSkip();}catch(e){console.warn(e);}
+  return _v5InitNk.apply(this,arguments);
+};
 
 /* ---------- Start ---------- */
 document.getElementById('hlogo').src=db.settings.company.logo||LOGO_MARK;
