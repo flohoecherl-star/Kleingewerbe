@@ -8181,6 +8181,8 @@ function brauchtListe(){
   const ohneRe=db.jobs.filter(j=>jStat(j)==='erledigt'&&j.customerId&&!j.invoiceId&&+j.preis>0&&j.date>=addDays(t,-60)&&!db.invoices.some(i=>i.jobId===j.id));
   const bh=backupHinweis();
   const lb=lbProbleme();
+  const dp=numberDupes();
+  if(dp.length)L.push(['bad',`Rechnungsnummer doppelt: ${dp.slice(0,3).map(esc).join(', ')}`,'Antippen und in einer Minute beheben','dupFix()']);
   if(over.length)L.push(['bad',`${over.length} Rechnung${over.length>1?'en':''} überfällig`,`${eur(sum(over,i=>offenOf(i)))} · Zahlungserinnerung schicken`,"fInv='faellig';go('inv')"]);
   if(jobsAlt.length)L.push(['warn',`${jobsAlt.length} Auftr${jobsAlt.length>1?'äge':'ag'} von früher noch offen`,'Erledigt melden oder neu planen',"planMode='liste';go('jobs')"]);
   if(ohneRe.length)L.push(['acc',`${ohneRe.length} erledigte${ohneRe.length>1?'':'r'} Auftr${ohneRe.length>1?'äge':'ag'} ohne Rechnung`,ohneRe.slice(0,3).map(j=>esc(jobName(j))).join(', '),"planMode='liste';fJob='erledigt';go('jobs')"]);
@@ -8289,7 +8291,7 @@ function vGeld(){
     ${chart12(y)}
   </div>
   ${gaps.length?`<div class="warn"><b>Lücke im Rechnungsnummernkreis:</b> ${gaps.join(', ')}. Storno-Rechnungen nie löschen.</div>`:''}
-  ${dupes.length?`<div class="warn"><b>Rechnungsnummer doppelt:</b> ${dupes.join(', ')}</div>`:''}
+  ${dupes.length?`<div class="warn"><b>Rechnungsnummer doppelt:</b> ${dupes.join(', ')}<div style="margin-top:8px"><button class="btn sm" onclick="dupFix()">Jetzt beheben</button></div></div>`:''}
   <div class="card">
     <div class="row between"><span class="lbl">Kleinunternehmer § 19 UStG</span><span class="hint mono">${eur(inc)} / 25.000 €</span></div>
     <div class="v5bar ${pct>90?'b':pct>70?'w':''}" style="margin:8px 0"><i style="width:${pct}%"></i></div>
@@ -9647,6 +9649,57 @@ function angebotWahl(){
   const L=[...db.customers].sort((a,b)=>sortName(a)<sortName(b)?-1:1);
   const el=sheet('Angebot aus Maßen',`<div class="hint" style="margin:0 2px 10px">Für welchen Kunden?</div><div class="v5list">${L.map(c=>`<button class="it n2" onclick="closeSheets();schnellAngebot('${c.id}')"><div style="min-width:0"><div class="nm">${esc(custName(c))}</div><div class="mt">${[+c.rasenM2?c.rasenM2+' m² Rasen':'',+c.heckeM?c.heckeM+' m Hecke':''].filter(Boolean).join(' · ')||'noch keine Maße'}</div></div><span class="v5car">›</span></button>`).join('')||'<div class="it n2"><div class="mt">Noch keine Kunden.</div></div>'}</div>`);
   el.dataset.nodirty='1';
+}
+
+/* =====================================================================
+   DOPPELTE RECHNUNGSNUMMERN BEHEBEN
+   Noch nicht beim Kunden: neue Nummer geben (Änderung wird vermerkt).
+   Schon verschickt: stornieren und mit neuer Nummer neu ausstellen.
+   ===================================================================== */
+function numberDupes(){
+  const c={};db.invoices.forEach(i=>{if(!i.draft&&!i.storniertDurch)c[i.number]=(c[i.number]||0)+1;});
+  return Object.keys(c).filter(k=>c[k]>1);
+}
+function nrFrei(){
+  const nk=db.settings.numbers,p=nk.invPrefix;
+  const mx=Math.max(0,...db.invoices.map(i=>String(i.number||'')).filter(n=>n.startsWith(p)).map(n=>+n.slice(p.length)).filter(n=>!isNaN(n)));
+  if(+nk.invNext<=mx)nk.invNext=mx+1;
+  return p+nk.invNext;
+}
+function dupFix(){
+  const el=sheet('Doppelte Rechnungsnummern','<div id="dfb"></div>');el.dataset.nodirty='1';
+  const draw=()=>{
+    const D=numberDupes();
+    el.querySelector('#dfb').innerHTML=!D.length?`<div class="card" style="--stripe:var(--moss)"><b>Alles in Ordnung.</b><div class="hint">Jede Rechnungsnummer gibt es nur noch einmal.</div></div>`
+    :`<div class="info">So gehst du vor: Die Rechnung, die <b>zuerst beim Kunden</b> war, behält die Nummer.<br>
+      Bei der anderen gilt: <b>Noch nicht verschickt</b> → „Neue Nummer“. <b>Schon beim Kunden</b> → „Stornieren & neu“, dann bekommt der Kunde eine Storno- und eine neue Rechnung, und alles bleibt nachvollziehbar.</div>
+    ${D.map(nr=>{const L=db.invoices.filter(i=>i.number===nr&&!i.draft&&!i.storniertDurch).sort((a,b)=>(a.date+(a.created||''))<(b.date+(b.created||''))?-1:1);
+      return `<div class="mgrp">Nummer ${esc(nr)} · ${L.length}×</div>${L.map((d,k)=>{const c=cust(d.customerId),st=statusOf(d);
+        return `<div class="card" style="--stripe:${k===0?'var(--moss)':'var(--clay)'}">
+          <div class="row between"><b>${esc(c.name)}</b><span class="mono" style="font-weight:800">${eur(totals(d).gross)}</span></div>
+          <div class="hint">vom ${dDE(d.date)} · ${({bezahlt:'bezahlt',offen:'offen',faellig:'überfällig',teilbezahlt:'teilweise bezahlt'})[st]||st}${(d.positions||[])[0]?' · '+esc(d.positions[0].desc||''):''}</div>
+          ${k===0?'<div class="hint" style="margin-top:4px;color:var(--moss)">Älteste – behält die Nummer</div>':''}
+          <div class="v5btns" style="margin-top:10px">
+            <button class="btn sm" onclick="viewDoc('invoice','${d.id}')">Ansehen</button>
+            <button class="btn sm" onclick="dupNeu('${d.id}')">Neue Nummer</button>
+            <button class="btn sm" onclick="dupStorno('${d.id}')">Stornieren & neu</button></div></div>`;}).join('')}`;}).join('')}`;};
+  el.__redraw=draw;draw();
+}
+function dupNeu(id){
+  const d=db.invoices.find(x=>x.id===id);if(!d)return;
+  const nr=nrFrei(),c=cust(d.customerId);
+  if(!confirm(`Rechnung ${d.number} an ${c.name} (${dDE(d.date)}, ${eur(totals(d).gross)}) bekommt die neue Nummer ${nr}.\n\nNur so machen, wenn diese Rechnung noch nicht beim Kunden ist, oder wenn du ihm die korrigierte Rechnung noch einmal schickst.\n\nDie alte Nummer wird an der Rechnung vermerkt.`))return;
+  d.nrKorrektur=(d.nrKorrektur||[]).concat([{ts:Date.now(),alt:d.number,neu:nr}]);
+  db.fahrten.filter(f=>f.invoiceId===d.id&&f.anlass).forEach(f=>f.anlass=f.anlass.split(d.number).join(nr));
+  d.number=nr;db.settings.numbers.invNext++;
+  save();render();refreshOpenViews();toast('Neue Nummer '+nr);
+}
+function dupStorno(id){
+  const d=db.invoices.find(x=>x.id===id);if(!d)return;
+  nrFrei();
+  stornoDoc(id);
+  if(!d.storniertDurch)return;
+  setTimeout(()=>{if(confirm(`Storno erstellt. Jetzt die Rechnung an ${cust(d.customerId).name} mit neuer Nummer neu ausstellen?`))dupDoc('invoice',id);},400);
 }
 
 /* ---------- Start ---------- */
