@@ -1297,7 +1297,8 @@ const DEFAULT={
  customers:[],items:[],invoices:[],offers:[],expenses:[],assets:[],times:[],iab:[],fahrten:[],jobs:[],recurring:[],aufgaben:[]
 };
 const SEED_ITEMS=[
- {name:'An- Abfahrt und Besorgungsfahrt',unit:'Stk',price:85},
+ {name:'An- und Abfahrt inkl. Verschleiß und Betriebskosten',unit:'Pauschal',price:55},
+ {name:'Besorgungsfahrt (Material, Entsorgung)',unit:'Pauschal',price:30},
  {name:'Arbeitsstunde Gartenpflege',unit:'Std',price:45},
  {name:'Rasen mähen inkl. Abtransport',unit:'Std',price:45},
  {name:'Heckenschnitt',unit:'lfm',price:12},
@@ -9284,7 +9285,7 @@ function bewertungFrage(j){
 function jobZuRechnung(id){
   const j=db.jobs.find(x=>x.id===id);if(!j)return;
   presetCust=j.customerId;try{editDoc('invoice');}finally{presetCust=null;}
-  if(!cur||(cur.positions||[]).length)return;
+  if(!cur||(cur.positions||[]).some(p=>!p._auto))return;
   cur.deliveryDate=j.date;cur.jobId=j.id;
   if(+j.preis>0)cur.positions.push({desc:j.titel||'Gartenarbeiten',qty:1,unit:'pauschal',price:+j.preis,comment:dDE(j.date)});
   else if(+j.ist>0)cur.positions.push({desc:j.titel||'Gartenarbeiten',qty:+j.ist,unit:'Std',price:+db.settings.defaults.hourRate||0,comment:dDE(j.date)});
@@ -9707,7 +9708,7 @@ jobDone=function(id){
    SCHNELL-ANGEBOT AUS DEN GARTENMASSEN
    Rasenfläche und Heckenlänge aus dem Gartenprofil × deine Preise.
    ===================================================================== */
-const PREIS_DEF={maehen:0.12,maehenMin:35,vertik:0.45,dueng:0.15,hecke:5,heckeEnts:1.2,laub:0.06,anfahrt:15};
+const PREIS_DEF={maehen:0.12,maehenMin:35,vertik:0.45,dueng:0.15,hecke:5,heckeEnts:1.2,laub:0.06,anfahrt:55};
 const preise=()=>Object.assign({},PREIS_DEF,db.settings.preise5||{});
 const HOEHE={1:['bis 1,5 m',1],1.4:['1,5 bis 2,5 m',1.4],1.9:['über 2,5 m (mit Gerüst/Leiter)',1.9]};
 function schnellAngebot(cid){
@@ -9724,7 +9725,7 @@ function schnellAngebot(cid){
     if(st.sel.laub&&m2)L.push({k:'laub',desc:'Laub von Rasen und Beeten entfernen',qty:m2,unit:'m²',price:P.laub});
     if(st.sel.hecke&&lf)L.push({k:'hecke',desc:`Heckenschnitt beidseitig und oben, Höhe ${HOEHE[st.hf][0]}`,qty:lf,unit:'lfm',price:+(P.hecke*st.hf).toFixed(2)});
     if(st.sel.heckeEnts&&lf)L.push({k:'heckeEnts',desc:'Schnittgut aufladen und fachgerecht entsorgen',qty:lf,unit:'lfm',price:P.heckeEnts});
-    if(st.sel.anfahrt&&L.length)L.push({k:'anfahrt',desc:'An- und Abfahrt',qty:1,unit:'Pauschal',price:P.anfahrt});
+    if(st.sel.anfahrt&&L.length)L.push({k:'anfahrt',desc:ANFAHRT_TXT,qty:1,unit:'Pauschal',price:P.anfahrt});
     return L;};
   const draw=()=>{
     const L=zeilen(),tot=sum(L,x=>x.qty*x.price);
@@ -10505,6 +10506,46 @@ v5Init=function(){
   setTimeout(()=>archivLauf(),3000);
   return _v5Init51.apply(this,arguments);
 };
+
+
+/* ---------- 5.1: Standard-Anfahrt in neuen Rechnungen und Angeboten ----------
+   Florian berechnet fast immer „An- und Abfahrt inkl. Verschleiß und
+   Betriebskosten“ (55 €). Besorgungsfahrt nur bei Bedarf aus dem Katalog.
+   Fahrtkosten zählen bei § 35a als Arbeitskosten (ARB_RX „fahrt“). */
+const ANFAHRT_TXT='An- und Abfahrt inkl. Verschleiß und Betriebskosten';
+const istAnfahrt=p=>/an-?\s*(und\s*)?abfahrt|anfahrt/i.test(p&&(p.desc||p.name)||'');
+function anfahrtItem(){return db.items.find(i=>istAnfahrt(i))||{name:ANFAHRT_TXT,unit:'Pauschal',price:preise().anfahrt||55};}
+function anfahrtPos(){const i=anfahrtItem();return {desc:i.name,qty:1,unit:i.unit||'Pauschal',price:+i.price||0,comment:'',_auto:true};}
+const _editDoc51b=editDoc;
+editDoc=function(type,id){
+  const r=_editDoc51b.apply(this,arguments);
+  try{if(!id&&cur&&cur._new&&db.settings.anfahrtAuto!==false&&!(cur.positions||[]).length){cur.positions.push(anfahrtPos());drawEditor();}}catch(e){console.warn(e);}
+  return r;
+};
+/* Beim Auftrag → Rechnung steht die Arbeit oben, die Anfahrt darunter */
+const _jobZuRechnung51=jobZuRechnung;
+jobZuRechnung=function(id){
+  const r=_jobZuRechnung51.apply(this,arguments);
+  try{if(cur&&cur.positions&&cur.positions[0]&&cur.positions[0]._auto&&cur.positions.length>1){cur.positions.push(cur.positions.shift());drawEditor();}}catch(e){}
+  return r;
+};
+/* _auto ist nur eine Markierung für den Editor */
+const _saveDoc51b=saveDoc;
+saveDoc=function(draft){try{(cur&&cur.positions||[]).forEach(p=>delete p._auto);}catch(e){}return _saveDoc51b.apply(this,arguments);};
+/* Einmalig: bestehenden Katalog umstellen */
+function katalog51(){
+  if(db.settings.kat51)return;
+  const alt=db.items.find(i=>/abfahrt.*besorgung|besorgung.*abfahrt/i.test(i.name||''));
+  if(alt){alt.name=ANFAHRT_TXT;alt.unit='Pauschal';alt.price=55;}
+  else if(!db.items.some(istAnfahrt))db.items.unshift({id:uid(),name:ANFAHRT_TXT,unit:'Pauschal',price:55});
+  if(!db.items.some(i=>/besorgung/i.test(i.name||'')))db.items.push({id:uid(),name:'Besorgungsfahrt (Material, Entsorgung)',unit:'Pauschal',price:30});
+  /* Anfahrt nach vorn, damit sie im Katalog oben steht */
+  const k=db.items.findIndex(istAnfahrt);if(k>0)db.items.unshift(db.items.splice(k,1)[0]);
+  if(db.settings.preise5&&(+db.settings.preise5.anfahrt===15))db.settings.preise5.anfahrt=55;
+  db.settings.kat51=Date.now();
+}
+const _v5Init51b=v5Init;
+v5Init=function(){try{katalog51();saveQuiet();}catch(e){console.warn(e);}return _v5Init51b.apply(this,arguments);};
 
 /* ---------- Start ---------- */
 document.getElementById('hlogo').src=db.settings.company.logo||LOGO_MARK;
