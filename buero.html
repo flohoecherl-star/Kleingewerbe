@@ -3189,7 +3189,7 @@ function viewDoc(type,id){
   <div class="card">
     ${d.positions.map(x=>`<div class="kv" style="align-items:flex-start"><span>${esc(x.desc)}<br><span class="hint mono">${nf.format(x.qty)} ${esc(x.unit)} × ${eur(x.price)}</span>${x.comment?`<br><span class="hint" style="font-style:italic">${nl2br(x.comment)}</span>`:''}</span><b class="mono">${eur(x.qty*x.price)}</b></div>`).join('')}
     <div class="kv"><span>Netto</span><b class="mono">${eur(t.net)}</b></div>
-    ${d.klein?'<div class="hint" style="padding:6px 0">${KU_HINWEIS}</div>':`<div class="kv"><span>USt ${d.vat}%</span><b class="mono">${eur(t.vat)}</b></div>`}
+    ${d.klein?`<div class="hint" style="padding:6px 0">${KU_HINWEIS}</div>`:`<div class="kv"><span>USt ${d.vat}%</span><b class="mono">${eur(t.vat)}</b></div>`}
     ${(d.abzuege||[]).map(a=>`<div class="kv"><span class="hint">abzüglich ${esc(a.number)} vom ${dDE(a.date)}</span><b class="mono">−${eur(a.gross)}</b></div>`).join('')}
     ${abzuegeSum(d)?`<div class="kv" style="font-size:17px"><b>Zahlbetrag</b><b class="mono">${eur(payable(d))}</b></div>`:''}
   </div>
