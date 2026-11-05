@@ -7929,7 +7929,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.0.1';
+const APP_VERSION5='5.0.2';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -8052,7 +8052,7 @@ function openCustomers(){closeSheets();go('kunden');}
 let wOff=0;
 function vHeute(){
   const t=today();
-  return nextCard()+weekPlan(true)+brauchtDich()+pflegeHinweis()+geldZeile();
+  return lbRunCard()+nextCard()+weekPlan(true)+brauchtDich()+pflegeHinweis()+geldZeile();
 }
 function nextCard(){
   const t=today();
@@ -8077,6 +8077,7 @@ function nextCard(){
       <button class="btn" onclick="unterwegs('${j.id}')" ${c&&telOf(c)?'':'disabled style="opacity:.45"'}>${icoSvg(IP.msg)}Unterwegs</button>
       <button class="btn" onclick="timerToggle('${j.id}')">${tm?'■ Stopp':icoSvg(IP.play)+'Start'}</button>
     </div>
+    ${lbActive()&&j.date===t&&j.fahrt!==false&&!j.lbId&&!ui.lbRun?`<button class="btn full" style="margin-top:8px" onclick="lbStartFahrt('${j.id}')">${icoSvg(IP.car)}Losfahren · km-Stand eintragen</button>`:''}
     ${j.date<=t?`<button class="btn pri full" onclick="jobDone('${j.id}')">Erledigt</button>`:''}
   </div>`;
 }
@@ -8895,20 +8896,38 @@ function fzEdit(id){
     ui.fz=f.id;uiSave();save();closeSheets();render();toast(id?'Gesichert':'Fahrtenbuch läuft');};
 }
 /* ---------- Fahrt starten / beenden ---------- */
-function lbStartFahrt(){
+function lbStartFahrt(jobId){
   const f=fzAkt();if(!f){fzEdit();return;}
-  const st=lbStand(f.id),now=new Date();
+  const j=jobId?db.jobs.find(x=>x.id===jobId):null,c=j&&j.customerId?cust(j.customerId):null;
+  const st=lbStand(f.id),now=new Date(),zielVor=j?(jobAdresse(j)||''):'';
   const el=sheet('Fahrt starten',`<div class="card">
-    <label class="f"><span>Kilometerstand jetzt</span><input id="ls_km" class="tacho" type="number" inputmode="numeric" value="${Math.round(st)}"></label>
+    ${j?`<div class="nm" style="font-weight:800;font-size:16px;margin-bottom:6px">${esc(jobName(j))}</div>`:''}
+    <label class="f"><span>Kilometerstand jetzt (Tacho)</span><input id="ls_km" class="tacho" type="number" inputmode="numeric" value="${Math.round(st)}"></label>
     <div class="hint">Laut Fahrtenbuch zuletzt ${fmtKm(st)}. Weicht der Tacho ab, trag den echten Stand ein; die Differenz wird als Lücke angezeigt.</div>
-    <label class="f" style="margin-top:8px"><span>Ziel (optional, geht auch am Ende)</span><input id="ls_z" placeholder="Kunde oder Adresse"></label></div>
+    <label class="f" style="margin-top:8px"><span>Ziel (optional, geht auch am Ende)</span><input id="ls_z" value="${esc(zielVor)}" placeholder="Kunde oder Adresse"></label></div>
+    <div class="hint" style="margin:0 2px 10px">Den Kilometerstand bei Ankunft trägst du mit „Angekommen“ oder spätestens bei „Erledigt“ ein.</div>
     <button class="btn pri full" id="ls_go">Los geht's</button>`);
   el.querySelector('#ls_go').onclick=()=>{
     const km=num(el.querySelector('#ls_km').value);if(!(km>0)){toast('Kilometerstand fehlt');return;}
-    ui.lbRun={fz:f.id,kmA:km,date:today(),zeitA:now.toTimeString().slice(0,5),ziel:el.querySelector('#ls_z').value.trim()};uiSave();
+    ui.lbRun={fz:f.id,kmA:km,date:today(),zeitA:now.toTimeString().slice(0,5),ziel:el.querySelector('#ls_z').value.trim(),
+      jobId:j?j.id:'',customerId:c&&c.id?c.id:'',partner:c&&c.id?custName(c):'',zweck:j?(j.titel||'Gartenpflege'):''};uiSave();
     closeSheets();render();toast('Fahrt läuft');};
 }
-function lbEnde(){const r=ui.lbRun;if(!r)return;lbEdit(null,{kmA:r.kmA,date:r.date,zeitA:r.zeitA,zeitE:new Date().toTimeString().slice(0,5),ziel:r.ziel,_run:true});}
+/* Laufende Fahrt in einen Eintrag überführen; zeitE leer lassen, wenn die Ankunftszeit nicht bekannt ist */
+function lbRunPreset(r,mitZeit){
+  const p={kmA:r.kmA,date:r.date,zeitA:r.zeitA,zeitE:mitZeit?new Date().toTimeString().slice(0,5):'',ziel:r.ziel,_run:true};
+  if(r.jobId||r.customerId){Object.assign(p,{art:'betrieb',customerId:r.customerId||'',partner:r.partner||'',zweck:r.zweck||'',jobId:r.jobId||''});}
+  return p;
+}
+function lbEnde(){const r=ui.lbRun;if(!r)return;lbEdit(null,lbRunPreset(r,true));}
+/* Hinweis auf der Startseite, solange eine Fahrt läuft */
+function lbRunCard(){
+  const r=ui.lbRun;if(!r||!lbActive())return '';
+  const j=r.jobId?db.jobs.find(x=>x.id===r.jobId):null;
+  return `<div class="card" style="--stripe:var(--accent)"><div class="lbl">Fahrt läuft</div>
+    <div class="hint" style="margin-top:4px">Seit ${esc(r.zeitA)} Uhr · Start bei ${fmtKm(r.kmA)}${j?' · '+esc(jobName(j)):r.ziel?' · '+esc(r.ziel):''}</div>
+    <button class="btn pri full" style="margin-top:10px" onclick="lbEnde()">Angekommen · km-Stand eintragen</button></div>`;
+}
 const lbNeu=preset=>{if(!lbActive()){fzEdit();return;}lbEdit(null,preset||{});};
 
 /* ---------- Eintrag bearbeiten ---------- */
@@ -9151,7 +9170,11 @@ function jobDone(id){
     save();closeSheets();render();
     celebrate('Auftrag erledigt');
     setTimeout(()=>{
-      if(lb&&j.fahrt!==false&&!j.lbId){
+      const r=ui.lbRun;
+      if(lb&&j.fahrt!==false&&!j.lbId&&r&&(!r.jobId||r.jobId===j.id)){
+        lbEdit(null,Object.assign(lbRunPreset(r,false),{art:'betrieb',customerId:hat?c.id:(r.customerId||''),partner:hat?custName(c):(r.partner||''),ziel:r.ziel||jobAdresse(j)||'',zweck:r.zweck||j.titel||'Gartenpflege',jobId:j.id}));
+        toast('Kilometerstand bei Ankunft eintragen');
+      }else if(lb&&j.fahrt!==false&&!j.lbId){
         lbEdit(null,{date:j.date,art:'betrieb',customerId:hat?c.id:'',partner:hat?custName(c):'',ziel:jobAdresse(j)||'',zweck:j.titel||'Gartenpflege',jobId:j.id,_vorschlag:lbStand(fzAkt().id)+(km||0)});
         toast('Kilometerstand eintragen');
       }else{
