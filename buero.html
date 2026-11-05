@@ -8940,7 +8940,7 @@ function kmStart(jobId){
     <div class="nm" style="font-weight:800;font-size:16px;margin-bottom:6px">${esc(jobName(j))}</div>
     <label class="f"><span>Kilometerstand jetzt (Tacho)</span><input id="ks_km" class="tacho" type="number" inputmode="numeric" value="${st?Math.round(st):''}"></label>
     ${st?`<div class="hint">Zuletzt eingetragen: ${fmtKm(st)}</div>`:''}</div>
-    <div class="hint" style="margin:0 2px 10px">Wenn du wieder zurück bist, trägst du auf „Heute“ den km-Stand am Ende ein. Die App rechnet die gefahrenen km für diese Fahrt dann selbst aus, statt sie zu schätzen.</div>
+    <div class="hint" style="margin:0 2px 10px">Erst wenn du wieder zurück bist, trägst du auf „Heute“ den km-Stand ein. Fährst du unterwegs noch zu weiteren Kunden oder zur Deponie, drückst du dort nur „Erledigt“: Alles landet in einer Fahrt mit den echten km.</div>
     <button class="btn pri full" id="ks_go">Los geht's</button>`);
   el.querySelector('#ks_go').onclick=()=>{
     const km=num(el.querySelector('#ks_km').value);if(!(km>0)){toast('Kilometerstand fehlt');return;}
@@ -8964,12 +8964,21 @@ function kmEnde(){
     const e=num(inp.value);
     if(!(e>r.kmA)){toast('km-Stand Ende muss größer als Beginn sein');return;}
     if(e-r.kmA>2000){toast('Über 2.000 km? Bitte prüfen');return;}
-    const km=Math.round(e-r.kmA);
-    let f=j&&j.fahrtId?db.fahrten.find(x=>x.id===j.fahrtId):null;
-    if(j&&!f){j.fahrtKm=km;jobFahrtenSchreiben(j);f=db.fahrten.find(x=>x.id===j.fahrtId);}
-    if(!f){const co=db.settings.company;f={id:uid(),date:r.date,von:`${co.street}, ${co.zip} ${co.city}`,nach:'',anlass:'',customerId:''};db.fahrten.push(f);}
-    Object.assign(f,{km,kmA:r.kmA,kmE:e,kmManual:true});
-    if(j)j.fahrtKm=km;
+    const km=Math.round(e-r.kmA),co=db.settings.company;
+    /* Eine Fahrt für die ganze Tour: alle Aufträge, die unterwegs erledigt wurden */
+    const J=[...new Set([r.jobId,...(r.jobs||[])])].map(id=>db.jobs.find(x=>x.id===id)).filter(Boolean);
+    let f=J.map(x=>x.fahrtId&&db.fahrten.find(y=>y.id===x.fahrtId)).find(Boolean);
+    if(!f){f={id:uid(),date:r.date,von:`${co.street}, ${co.zip} ${co.city}`.trim()};db.fahrten.push(f);}
+    const k0=J.length&&J[0].customerId?cust(J[0].customerId):null;
+    const ziele=[...new Set(J.map(x=>jobAdresse(x)).filter(Boolean))];
+    if(J.some(x=>x.ents))ziele.push((db.settings.fahrtenbuch||{}).deponieName||'Mülldeponie');
+    Object.assign(f,{date:r.date,km,kmA:r.kmA,kmE:e,kmManual:true,auto:false,jobId:J.length?J[0].id:'',customerId:k0&&k0.id?k0.id:'',
+      nach:ziele.length?ziele.join(' · ')+' (und zurück)':(f.nach||''),
+      anlass:J.length?J.map(x=>{const c=x.customerId?cust(x.customerId):null;return (x.titel||'Auftrag')+(c&&c.id?' · '+c.name:'');}).join(' / '):(f.anlass||'')});
+    /* geschätzte Fahrten dieser Aufträge (auch Entsorgungsfahrten) gehen in der Tour auf */
+    J.forEach(x=>{[x.fahrtId,x.entsFahrtId].forEach(fid=>{if(fid&&fid!==f.id){const i=db.fahrten.findIndex(y=>y.id===fid);
+        if(i>=0&&!db.fahrten[i].kmE){const ex=db.fahrten[i].expenseId;db.fahrten.splice(i,1);syncBookedExpense(ex);}}});
+      x.fahrtId=f.id;if(x.ents)x.entsFahrtId=f.id;if(J.length===1)x.fahrtKm=km;});
     syncBookedExpense(f.expenseId);
     ui.kmRun=null;uiSave();save();closeSheets();render();toast(`${fmtKm(km)} gefahren · gespeichert`);};
 }
@@ -9193,7 +9202,7 @@ function jobDone(id){
   const c=j.customerId?cust(j.customerId):null,hat=!!(c&&c.id);
   const fb=db.settings.fahrtenbuch||{},lb=lbActive()&&j.date>=lbStart();
   const km=j.fahrt!==false?(+j.fahrtKm||(hat?+c.kmRoundtrip||0:0)):0;
-  const kr=!lb&&ui.kmRun&&ui.kmRun.jobId===j.id;
+  const kr=!lb&&ui.kmRun&&ui.kmRun.date===j.date&&j.fahrt!==false;
   const fahrtTxt=lb?'Danach trägst du die Fahrt mit Kilometerstand ins Fahrtenbuch ein.'
     :kr?'Die Fahrt läuft noch. Wenn du zurück bist, trägst du auf „Heute“ den km-Stand ein; dann stehen die echten km statt der geschätzten im Fahrtenbuch.'
     :j.fahrt!==false?`Ins Fahrtenbuch kommt eine Fahrt über ${km?nf.format(km)+' km':'? km'}${j.ents?' und eine Entsorgungsfahrt':''}.`:'Es wird keine Fahrt eingetragen.';
@@ -9225,7 +9234,8 @@ function jobDone(id){
       j.sig={img:o.toDataURL('image/jpeg',.7),name:el.querySelector('#jd_name').value.trim(),ts:Date.now()};
     }
     j.status='erledigt';j.erledigtAm=today();
-    const dop=!lb&&j.fahrt!==false&&!j.fahrtId&&j.customerId&&db.fahrten.some(f=>f.customerId===j.customerId&&f.date===j.date&&!isDepFahrt(f));
+    if(kr){const r=ui.kmRun;r.jobs=[...new Set([...(r.jobs||[]),r.jobId,j.id].filter(Boolean))];uiSave();}
+    const dop=kr||!lb&&j.fahrt!==false&&!j.fahrtId&&j.customerId&&db.fahrten.some(f=>f.customerId===j.customerId&&f.date===j.date&&!isDepFahrt(f));
     const n=dop?0:jobFahrtenSchreiben(j);
     save();closeSheets();render();
     celebrate('Auftrag erledigt');
@@ -9238,7 +9248,7 @@ function jobDone(id){
         lbEdit(null,{date:j.date,art:'betrieb',customerId:hat?c.id:'',partner:hat?custName(c):'',ziel:jobAdresse(j)||'',zweck:j.titel||'Gartenpflege',jobId:j.id,_vorschlag:lbStand(fzAkt().id)+(km||0)});
         toast('Kilometerstand eintragen');
       }else{
-        toast(n?`Erledigt · ${n===1?'Fahrt':n+' Fahrten'} eingetragen`:'Erledigt');
+        toast(kr?'Erledigt · km folgen beim Zurückkommen':n?`Erledigt · ${n===1?'Fahrt':n+' Fahrten'} eingetragen`:'Erledigt');
         bewertungFrage(j);
       }
     },900);
