@@ -1662,7 +1662,8 @@ async function maybeAutoKm(id,force){
     c.kmRoundtrip=km;c.kmAuto=true;c.kmAdr=key;save();
     if(typeof render==='function')render();
     toast(c.name+': '+nf.format(km)+' km hin und zurück');
-  }catch(e){console.warn('km',e);}
+  }catch(e){console.warn('km',e);
+    if(!/ausgeschaltet/.test(e.message||''))toast(c.name+': Entfernung nicht berechnet ('+(e.message||'Kartendienst')+'). In der Kundenakte von Hand eintragen.');}
 }
 async function kmAlleKunden(){
   const offen=db.customers.filter(c=>{const k=adrText(objAdr(c));
@@ -2899,12 +2900,10 @@ function drawEditor(){
   document.getElementById('ed').innerHTML=`
   <div class="card">
     <div class="grid2">
-      <label class="f"><span>Nummer</span><input value="${esc(cur.number)}" onchange="cur.number=this.value"></label>
+      <label class="f"><span>Nummer</span><input value="${esc(cur.number)}" ${isInv?'readonly style="opacity:.6" title="Wird beim Festschreiben vergeben"':'onchange="cur.number=this.value"'}></label>
       <label class="f"><span>${isInv?'Rechnungsdatum':'Angebotsdatum'}</span><input type="date" value="${cur.date}" onchange="cur.date=this.value;drawEditor()"></label>
     </div>
-    <label class="f"><span>Kunde</span><select onchange="cur.customerId=this.value;drawEditor()">
-      ${db.customers.filter(c=>!c.archiviert||c.id===cur.customerId).map(c=>`<option value="${c.id}" ${c.id===cur.customerId?'selected':''}>${esc(c.name)}</option>`).join('')||'<option value="">— keiner angelegt —</option>'}
-    </select></label>
+    <label class="f"><span>Kunde</span>${kundeFeld()}</label>
     <button class="btn sm" onclick="editCustomer(null,cb=>{cur.customerId=cb;drawEditor()})">Neuen Kunden anlegen</button>
     ${isInv?`<div style="margin-top:12px">
       <div class="lbl" style="margin-bottom:6px">Leistungsdatum</div>
@@ -2944,7 +2943,7 @@ function drawEditor(){
           <button onclick="dupPos(${i})" title="duplizieren">⧉</button>
           <button class="dan" onclick="cur.positions.splice(${i},1);drawEditor()" title="löschen">✕</button>
         </div></div>
-      <input value="${esc(p.desc)}" placeholder="Beschreibung" onchange="cur.positions[${i}].desc=this.value">
+      <textarea class="pdesc" rows="1" style="resize:none;overflow:hidden" placeholder="Beschreibung" oninput="cur.positions[${i}].desc=this.value;autoGrow(this)">${esc(p.desc)}</textarea>
       <div class="r3">
         <input type="number" step="0.01" inputmode="decimal" value="${p.qty}" oninput="cur.positions[${i}].qty=+this.value;refreshSums()" placeholder="Menge">
         <select onchange="setUnit(${i},this.value)">
@@ -7936,10 +7935,10 @@ function wxOpen(){
         <div class="g"><div class="nm">${wTag(ds)}${jobs.length?` · <span style="color:var(--accent-text,var(--moss))">${jobs.length} Auftr${jobs.length>1?'äge':'ag'}</span>`:''}</div>
         <div class="mt" style="${b&&jobs.length?'color:var(--clay)':''}">${wxText(w.code)} · Regenrisiko ${w.pp??0} %${(+w.ps||0)>=0.1?' ('+n1(w.ps)+' mm)':''}${b&&/^Sturm/.test(b)?' · '+esc(b):''}</div></div>
         <div class="amt mono" style="font-size:17px">${Math.round(w.tmax)}°<span class="hint"> ${Math.round(w.tmin)}°</span></div></div>`;}).join('')}</div>
-      <button class="btn full" onclick="wxLoad(true).then(()=>el.__redraw())">Aktualisieren</button>
+      <button class="btn full" onclick="const sh=this.closest('.sheet');wxLoad(true).then(()=>sh&&sh.__redraw&&sh.__redraw())">Aktualisieren</button>
       <div class="hint" style="margin:8px 2px">Standort: ${esc(adrText(db.settings.company))}. Ein Tag gilt als schlecht ab 5 mm Regen, bei Gewitter, Schnee oder Böen ab 60 km/h. Vorhersage: Open-Meteo.</div>`
       :`<div class="card"><div class="empty">Noch keine Vorhersage. ${adrText(db.settings.company)?'Internet einschalten und aktualisieren.':'Erst die Firmenadresse eintragen.'}</div></div>
-      <button class="btn pri full" onclick="wxLoad(true).then(()=>el.__redraw())">Wetter laden</button>`;};
+      <button class="btn pri full" onclick="const sh=this.closest('.sheet');wxLoad(true).then(()=>sh&&sh.__redraw&&sh.__redraw())">Wetter laden</button>`;};
   el.__redraw=draw;draw();
 }
 
@@ -7955,7 +7954,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.1.0';
+const APP_VERSION5='5.1.1';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -8098,13 +8097,23 @@ function nextCard(){
     <div class="when"><span class="ptag">${wann}${j.time?' · '+esc(j.time):''}</span>${+j.dauer?`<span class="chipx">ca. ${nf.format(+j.dauer).replace(',00','')} Std</span>`:''}${+j.preis?`<span class="chipx">${eur(j.preis)}</span>`:''}${j.pflege?'<span class="chipx">Pflege</span>':''}</div>
     <h2 onclick="editJob('${j.id}')" style="cursor:pointer">${esc(jobName(j))}</h2>
     ${(j.titel&&c&&c.id)||adr?`<div class="adr">${c&&c.id&&j.titel?esc(c.name)+' · ':''}${esc(adr)}</div>`:''}
-    <div class="v5btns">
+    <div class="v5btns two">
       <button class="btn" onclick="jobRoute('${j.id}')">${icoSvg(IP.route)}Route</button>
       <button class="btn" onclick="unterwegs('${j.id}')" ${c&&telOf(c)?'':'disabled style="opacity:.45"'}>${icoSvg(IP.msg)}Unterwegs</button>
-      <button class="btn" onclick="timerToggle('${j.id}')">${tm?'■ Stopp':icoSvg(IP.play)+'Start'}</button>
     </div>
-    ${j.date===t&&j.fahrt!==false&&!j.lbId&&!ui.lbRun&&!ui.kmRun?`<button class="btn full" style="margin-top:8px" onclick="lbStartFahrt('${j.id}')">${icoSvg(IP.car)}Losfahren · km-Stand eintragen</button>`:''}
-    ${j.date<=t?`<button class="btn pri full" onclick="jobDone('${j.id}')">Erledigt</button>`:''}
+    ${(()=>{ /* 5.1.1: immer nur der nächste Schritt groß – Losfahren → Arbeit starten → Erledigt */
+      const fahrtOffen=j.date===t&&j.fahrt!==false&&!j.lbId&&!ui.lbRun&&!ui.kmRun&&ui.ohneKm!==j.id;
+      if(j.date!==t)return j.date<t?`<button class="btn pri full" onclick="jobDone('${j.id}')">Erledigt</button>`:'';
+      if(fahrtOffen)return `<div class="hint" style="margin:10px 2px 6px">Schritt 1 von 3</div>
+        <button class="btn pri full" onclick="lbStartFahrt('${j.id}')">${icoSvg(IP.car)}Losfahren · km-Stand eintragen</button>
+        <button class="btn sm full" style="margin-top:6px" onclick="ui.ohneKm='${j.id}';uiSave();render()">Ohne km weiter</button>`;
+      if(!tm)return `<div class="hint" style="margin:10px 2px 6px">Schritt 2 von 3 · Arbeitszeit ohne Fahrt</div>
+        <button class="btn pri full" onclick="timerToggle('${j.id}')">${icoSvg(IP.play)}Arbeit starten</button>
+        <button class="btn full" style="margin-top:6px" onclick="jobDone('${j.id}')">Erledigt (Zeit von Hand)</button>`;
+      return `<div class="hint" style="margin:10px 2px 6px">Schritt 3 von 3 · Stoppuhr läuft</div>
+        <button class="btn pri full" onclick="jobDone('${j.id}')">Erledigt · Zeit übernehmen</button>
+        <button class="btn sm full" style="margin-top:6px" onclick="timerToggle('${j.id}')">■ Nur Stoppuhr anhalten</button>`;
+    })()}
   </div>`;
 }
 /* Wochenplan: sieben Tage untereinander, je Tag Wetter und Aufträge */
@@ -10550,6 +10559,99 @@ function katalog51(){
 }
 const _v5Init51b=v5Init;
 v5Init=function(){try{katalog51();saveQuiet();}catch(e){console.warn(e);}return _v5Init51b.apply(this,arguments);};
+
+
+/* =====================================================================
+   VERSION 5.1.1 – Alltag
+   ===================================================================== */
+/* Kundenauswahl: keine Vorauswahl, Suche nach Name, Ort, Straße */
+function kundeFeld(){
+  const c=cur&&cur.customerId?cust(cur.customerId):null;
+  return `<button class="btn full" style="justify-content:flex-start;text-align:left;min-height:52px;${c&&c.id?'':'border-color:var(--clay)'}" onclick="kundeWaehlen()">
+    ${c&&c.id?`<span style="min-width:0"><b>${esc(custName(c))}</b><br><span class="hint">${esc([c.street,[c.zip,c.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')||'Adresse fehlt')}</span></span>`
+      :'<span style="color:var(--clay);font-weight:700">Kunde wählen …</span>'}</button>`;
+}
+function kundeWaehlen(){
+  const el=sheet('Kunde wählen',`<input id="kw_q" type="search" placeholder="Name, Ort oder Straße" autocomplete="off" style="margin-bottom:10px">
+    <div id="kw_l"></div>
+    <button class="btn full" style="margin-top:10px" onclick="closeSheet(this.closest('.sheet'));editCustomer(null,cb=>{cur.customerId=cb;drawEditor()})">Neuen Kunden anlegen</button>`);
+  el.dataset.nodirty='1';
+  const q=el.querySelector('#kw_q'),box=el.querySelector('#kw_l');
+  const alle=db.customers.filter(c=>!c.archiviert);
+  const zuletzt=alle.map(c=>({c,l:custLast(c.id)||''})).filter(x=>x.l).sort((a,b)=>a.l<b.l?1:-1).slice(0,5).map(x=>x.c);
+  const row=c=>`<button class="it n2" data-id="${c.id}"><div style="min-width:0"><div class="nm">${esc(custName(c))}</div><div class="mt">${esc([c.street,c.city].filter(Boolean).join(', ')||'Adresse fehlt')}</div></div><span class="v5car">›</span></button>`;
+  const draw=()=>{
+    const s=q.value.toLowerCase().trim();
+    const L=alle.filter(c=>!s||(custName(c)+' '+(c.company||'')+' '+(c.street||'')+' '+(c.zip||'')+' '+(c.city||'')+' '+(c.number||'')).toLowerCase().includes(s))
+      .sort((a,b)=>sortName(a).localeCompare(sortName(b),'de'));
+    box.innerHTML=(!s&&zuletzt.length?`<div class="mgrp">Zuletzt</div><div class="v5list">${zuletzt.map(row).join('')}</div><div class="mgrp">Alle A–Z</div>`:'')
+      +(L.length?`<div class="v5list">${L.map(row).join('')}</div>`:'<div class="card"><div class="empty">Kein Kunde passt.</div></div>');
+    box.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{cur.customerId=b.dataset.id;closeSheet(el);drawEditor();});
+  };
+  q.oninput=draw;draw();setTimeout(()=>{try{q.focus();}catch(e){}},250);
+}
+const _editDoc511=editDoc;
+editDoc=function(type,id){
+  const vor=presetCust;
+  const r=_editDoc511.apply(this,arguments);
+  try{if(!id&&cur&&cur._new&&!vor){cur.customerId='';drawEditor();}}catch(e){}
+  return r;
+};
+/* Beschreibungsfelder an den Text anpassen */
+const _drawEditor511=drawEditor;
+drawEditor=function(){const r=_drawEditor511.apply(this,arguments);
+  try{document.querySelectorAll('#ed textarea.pdesc').forEach(autoGrow);}catch(e){}return r;};
+/* Storno einer bezahlten Rechnung: Rückzahlung gleich erfassen */
+const _stornoDoc511=stornoDoc;
+stornoDoc=function(id){
+  const d=db.invoices.find(x=>x.id===id);const bez=d?paid(d):0,vorher=d&&d.storniertDurch;
+  const r=_stornoDoc511.apply(this,arguments);
+  try{
+    if(d&&!vorher&&d.storniertDurch&&bez>0.004){
+      const st=db.invoices.find(x=>x.stornoVon===d.number&&x.number===d.storniertDurch);
+      if(st)rueckzahlung(st.id,bez);
+    }
+  }catch(e){console.warn(e);}
+  return r;
+};
+function rueckzahlung(stId,betrag){
+  const st=db.invoices.find(x=>x.id===stId);if(!st)return;
+  const el=sheet('Geld zurückgezahlt?',`<div class="card" style="--stripe:var(--clay)">
+    <div class="hint">Der Kunde hatte ${eur(betrag)} bezahlt. Trag ein, wann du das Geld zurücküberwiesen hast. Sonst zählt es weiter als Einnahme.</div>
+    <label class="f" style="margin-top:10px"><span>Zurückgezahlt am</span><input type="date" id="rz_d" value="${today()}"></label>
+    <label class="f"><span>Betrag €</span><input type="number" step="0.01" inputmode="decimal" id="rz_a" value="${betrag.toFixed(2)}"></label></div>
+    <button class="btn pri full" id="rz_ok">Rückzahlung eintragen</button>
+    <button class="btn full" style="margin-top:8px" id="rz_spaeter">Später (in der Storno-Rechnung unter Zahlungen)</button>
+    <div class="hint" style="margin:8px 2px">Verrechnest du das Geld mit der neuen Rechnung, trag hier nichts ein und die Zahlung dort ein.</div>`);
+  el.dataset.nodirty='1';
+  el.querySelector('#rz_spaeter').onclick=()=>closeSheet(el);
+  el.querySelector('#rz_ok').onclick=()=>{
+    const a=num(el.querySelector('#rz_a').value),dt=el.querySelector('#rz_d').value||today();
+    if(!(a>0)){toast('Betrag fehlt');return;}
+    st.payments=st.payments||[];st.payments.push({date:dt,amount:-a,rueck:true});
+    save();closeSheet(el);render();toast('Rückzahlung vom '+dDE(dt)+' eingetragen');
+  };
+}
+/* Erledigt stoppt eine laufende Stoppuhr dieses Auftrags und übernimmt die Zeit */
+const _jobDone511=jobDone;
+jobDone=function(id){
+  try{const r=timerRun();if(r&&r.jobId===id)timerStop(true);}catch(e){}
+  if(ui.ohneKm===id){ui.ohneKm=null;uiSave();}
+  return _jobDone511.apply(this,arguments);
+};
+/* Zweiter Routendienst, falls der OSRM-Demoserver nicht antwortet */
+const _routeKm511=routeKm;
+routeKm=async function(a,b){
+  try{return await _routeKm511(a,b);}
+  catch(e1){
+    try{
+      const r=await fetch(`https://routing.openstreetmap.de/routed-car/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false&alternatives=false`);
+      const j=r.ok?await r.json():null;
+      if(j&&j.code==='Ok'&&j.routes&&j.routes[0])return j.routes[0].distance/1000;
+    }catch(e2){}
+    throw new Error(navigator.onLine===false?'Kein Internet':'Beide Routendienste nicht erreichbar');
+  }
+};
 
 /* ---------- Start ---------- */
 document.getElementById('hlogo').src=db.settings.company.logo||LOGO_MARK;
