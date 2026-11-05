@@ -10519,7 +10519,11 @@ function anfahrtPos(){const i=anfahrtItem();return {desc:i.name,qty:1,unit:i.uni
 const _editDoc51b=editDoc;
 editDoc=function(type,id){
   const r=_editDoc51b.apply(this,arguments);
-  try{if(!id&&cur&&cur._new&&db.settings.anfahrtAuto!==false&&!(cur.positions||[]).length){cur.positions.push(anfahrtPos());drawEditor();}}catch(e){console.warn(e);}
+  try{if(!id&&cur&&cur._new){
+    /* archivierte Kunden nie vorauswählen */
+    if(cust(cur.customerId).archiviert){const k=db.customers.find(c=>!c.archiviert);cur.customerId=k?k.id:'';}
+    if(db.settings.anfahrtAuto!==false&&!(cur.positions||[]).length)cur.positions.push(anfahrtPos());
+    drawEditor();}}catch(e){console.warn(e);}
   return r;
 };
 /* Beim Auftrag → Rechnung steht die Arbeit oben, die Anfahrt darunter */
