@@ -1967,7 +1967,7 @@ function fahrtRow(f){
   const booked=isBookedFahrt(f),warn=!(+f.km>0);
   return `<div class="item" onclick="editFahrt('${f.id}')">
     <div class="g"><div class="nm">${esc(f.nach||'')}</div>
-      <div class="mt">${dDE(f.date)} · ${esc(f.anlass||(c?c.name:''))}${f.auto?' · Auto':''}${booked?' · Verbucht':''}</div></div>
+      <div class="mt">${dDE(f.date)} · ${esc(f.anlass||(c?c.name:''))}${f.kmE?' · km-Stand':f.auto?' · Auto':''}${booked?' · Verbucht':''}</div></div>
     <div style="text-align:right"><div class="amt mono" style="${warn?'color:var(--clay)':''}">${warn?'km fehlt':nf.format(f.km||0)+' km'}</div></div></div>`;
 }
 function vFahrten(){
@@ -2020,7 +2020,10 @@ function editFahrt(id){
     <label class="f"><span>Datum</span><input id="f_date" type="date" value="${f.date}"></label>
     <label class="f"><span>Von</span><input id="f_von" value="${esc(f.von)}"></label>
     <label class="f"><span>Nach</span><input id="f_nach" value="${esc(f.nach)}"></label>
-    <label class="f"><span>Kilometer</span><input id="f_km" type="number" step="0.1" inputmode="decimal" value="${f.km||''}"></label>
+    <div class="grid2"><label class="f"><span>km-Stand Beginn</span><input id="f_ka" class="tacho" type="number" inputmode="numeric" value="${f.kmA?Math.round(f.kmA):''}" placeholder="optional"></label>
+      <label class="f"><span>km-Stand Ende</span><input id="f_ke" class="tacho" type="number" inputmode="numeric" value="${f.kmE?Math.round(f.kmE):''}" placeholder="optional"></label></div>
+    <label class="f"><span>Gefahrene Kilometer</span><input id="f_km" type="number" step="0.1" inputmode="decimal" value="${f.km||''}"></label>
+    <div class="hint" style="margin:-4px 2px 8px">Mit beiden km-Ständen rechnet die App die Kilometer selbst aus. Sonst trägst du die gefahrenen km direkt ein.</div>
     <label class="f"><span>Anlass</span><input id="f_anlass" value="${esc(f.anlass||'')}" placeholder="z. B. Kundentermin, Materialkauf"></label>
     <label class="f"><span>Kunde (optional)</span><select id="f_cust"><option value="">— keiner —</option>
       ${db.customers.map(c=>`<option value="${c.id}" ${c.id===f.customerId?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
@@ -2030,12 +2033,18 @@ function editFahrt(id){
     :(id?`<button class="btn full" style="margin-top:8px" onclick="bookFahrt('${id}')">Als Ausgabe verbuchen${f.km?` (${eur(f.km*0.3)})`:''}</button>`:'')}
   <button class="btn pri full" style="margin-top:8px" id="f_save">Sichern</button>
   ${id?`<button class="btn full dan" style="margin-top:8px" onclick="delFahrt('${id}')">Löschen</button>`:''}`);
+  const fKmCalc=()=>{const a=num(el.querySelector('#f_ka').value),e=num(el.querySelector('#f_ke').value);if(a>0&&e>a)el.querySelector('#f_km').value=Math.round(e-a);};
+  el.querySelector('#f_ka').oninput=fKmCalc;el.querySelector('#f_ke').oninput=fKmCalc;
   el.querySelector('#f_save').onclick=()=>{
+    const ka=num(el.querySelector('#f_ka').value),ke=num(el.querySelector('#f_ke').value);
+    if(ka>0&&ke>0&&ke<=ka){toast('km-Stand Ende muss größer als Beginn sein');return;}
+    f.kmA=ka>0?ka:'';f.kmE=ke>0?ke:'';
     f.date=el.querySelector('#f_date').value||today();
     f.von=el.querySelector('#f_von').value.trim();
     f.nach=el.querySelector('#f_nach').value.trim();
-    f.km=num(el.querySelector('#f_km').value);
+    f.km=f.kmA&&f.kmE?Math.round(f.kmE-f.kmA):num(el.querySelector('#f_km').value);
     f.anlass=el.querySelector('#f_anlass').value.trim();
+    if(f.kmA&&f.kmE)f.kmManual=true;
     f.customerId=el.querySelector('#f_cust').value;
     if(f.auto)f.kmManual=true;   // von Hand angefasst: beim Speichern der Rechnung nicht mehr überschreiben
     const i=db.fahrten.findIndex(x=>x.id===f.id);
@@ -8093,7 +8102,7 @@ function nextCard(){
       <button class="btn" onclick="unterwegs('${j.id}')" ${c&&telOf(c)?'':'disabled style="opacity:.45"'}>${icoSvg(IP.msg)}Unterwegs</button>
       <button class="btn" onclick="timerToggle('${j.id}')">${tm?'■ Stopp':icoSvg(IP.play)+'Start'}</button>
     </div>
-    ${lbActive()&&j.date===t&&j.fahrt!==false&&!j.lbId&&!ui.lbRun?`<button class="btn full" style="margin-top:8px" onclick="lbStartFahrt('${j.id}')">${icoSvg(IP.car)}Losfahren · km-Stand eintragen</button>`:''}
+    ${j.date===t&&j.fahrt!==false&&!j.lbId&&!ui.lbRun&&!ui.kmRun?`<button class="btn full" style="margin-top:8px" onclick="lbStartFahrt('${j.id}')">${icoSvg(IP.car)}Losfahren · km-Stand eintragen</button>`:''}
     ${j.date<=t?`<button class="btn pri full" onclick="jobDone('${j.id}')">Erledigt</button>`:''}
   </div>`;
 }
@@ -8913,7 +8922,7 @@ function fzEdit(id){
 }
 /* ---------- Fahrt starten / beenden ---------- */
 function lbStartFahrt(jobId){
-  const f=fzAkt();if(!f){fzEdit();return;}
+  const f=fzAkt();if(!f){if(jobId){kmStart(jobId);return;}fzEdit();return;}
   const j=jobId?db.jobs.find(x=>x.id===jobId):null,c=j&&j.customerId?cust(j.customerId):null;
   const st=lbStand(f.id),now=new Date(),zielVor=j?(jobAdresse(j)||''):'';
   const el=sheet('Fahrt starten',`<div class="card">
@@ -8936,8 +8945,66 @@ function lbRunPreset(r,mitZeit){
   return p;
 }
 function lbEnde(){const r=ui.lbRun;if(!r)return;lbEdit(null,lbRunPreset(r,true));}
+/* ---------- Einfacher Modus (ohne eingerichtetes Fahrtenbuch) ----------
+   Start-km beim Losfahren, End-km zurück am Betrieb: Die Auftragsfahrt bekommt die
+   echten km statt der geschätzten Entfernung. Keine Kette, keine Festschreibung. */
+const kmLetzter=()=>Math.max(0,...db.fahrten.map(f=>+f.kmE||0));
+function kmStart(jobId){
+  const j=db.jobs.find(x=>x.id===jobId);if(!j)return;
+  const st=kmLetzter();
+  const el=sheet('Losfahren',`<div class="card">
+    <div class="nm" style="font-weight:800;font-size:16px;margin-bottom:6px">${esc(jobName(j))}</div>
+    <label class="f"><span>Kilometerstand jetzt (Tacho)</span><input id="ks_km" class="tacho" type="number" inputmode="numeric" value="${st?Math.round(st):''}"></label>
+    ${st?`<div class="hint">Zuletzt eingetragen: ${fmtKm(st)}</div>`:''}</div>
+    <div class="hint" style="margin:0 2px 10px">Erst wenn du wieder zurück bist, trägst du auf „Heute“ den km-Stand ein. Fährst du unterwegs noch zu weiteren Kunden oder zur Deponie, drückst du dort nur „Erledigt“: Alles landet in einer Fahrt mit den echten km.</div>
+    <button class="btn pri full" id="ks_go">Los geht's</button>`);
+  el.querySelector('#ks_go').onclick=()=>{
+    const km=num(el.querySelector('#ks_km').value);if(!(km>0)){toast('Kilometerstand fehlt');return;}
+    ui.kmRun={jobId,kmA:km,date:today(),zeitA:new Date().toTimeString().slice(0,5)};uiSave();
+    closeSheets();render();toast('Fahrt läuft');};
+}
+function kmEnde(){
+  const r=ui.kmRun;if(!r)return;
+  const j=db.jobs.find(x=>x.id===r.jobId);
+  const el=sheet('Zurück',`<div class="card">
+    ${j?`<div class="nm" style="font-weight:800;font-size:16px;margin-bottom:6px">${esc(jobName(j))}</div>`:''}
+    <div class="hint">Start bei ${fmtKm(r.kmA)} um ${esc(r.zeitA)} Uhr</div>
+    <label class="f" style="margin-top:8px"><span>Kilometerstand jetzt (Tacho)</span><input id="ke_km" class="tacho" type="number" inputmode="numeric"></label>
+    <div class="hint" id="ke_info"></div></div>
+    <button class="btn pri full" id="ke_s">Fahrt speichern</button>
+    <button class="btn full" style="margin-top:8px" id="ke_x">Fahrt verwerfen</button>`);
+  const inp=el.querySelector('#ke_km');
+  inp.oninput=()=>{const e=num(inp.value);el.querySelector('#ke_info').innerHTML=e>r.kmA?`<b>${fmtKm(e-r.kmA)}</b> gefahren`:'';};
+  el.querySelector('#ke_x').onclick=()=>{if(!confirm('Laufende Fahrt verwerfen?'))return;ui.kmRun=null;uiSave();closeSheets();render();};
+  el.querySelector('#ke_s').onclick=()=>{
+    const e=num(inp.value);
+    if(!(e>r.kmA)){toast('km-Stand Ende muss größer als Beginn sein');return;}
+    if(e-r.kmA>2000){toast('Über 2.000 km? Bitte prüfen');return;}
+    const km=Math.round(e-r.kmA),co=db.settings.company;
+    /* Eine Fahrt für die ganze Tour: alle Aufträge, die unterwegs erledigt wurden */
+    const J=[...new Set([r.jobId,...(r.jobs||[])])].map(id=>db.jobs.find(x=>x.id===id)).filter(Boolean);
+    let f=J.map(x=>x.fahrtId&&db.fahrten.find(y=>y.id===x.fahrtId)).find(Boolean);
+    if(!f){f={id:uid(),date:r.date,von:`${co.street}, ${co.zip} ${co.city}`.trim()};db.fahrten.push(f);}
+    const k0=J.length&&J[0].customerId?cust(J[0].customerId):null;
+    const ziele=[...new Set(J.map(x=>jobAdresse(x)).filter(Boolean))];
+    if(J.some(x=>x.ents))ziele.push((db.settings.fahrtenbuch||{}).deponieName||'Mülldeponie');
+    Object.assign(f,{date:r.date,km,kmA:r.kmA,kmE:e,kmManual:true,auto:false,jobId:J.length?J[0].id:'',customerId:k0&&k0.id?k0.id:'',
+      nach:ziele.length?ziele.join(' · ')+' (und zurück)':(f.nach||''),
+      anlass:J.length?J.map(x=>{const c=x.customerId?cust(x.customerId):null;return (x.titel||'Auftrag')+(c&&c.id?' · '+c.name:'');}).join(' / '):(f.anlass||'')});
+    /* geschätzte Fahrten dieser Aufträge (auch Entsorgungsfahrten) gehen in der Tour auf */
+    J.forEach(x=>{[x.fahrtId,x.entsFahrtId].forEach(fid=>{if(fid&&fid!==f.id){const i=db.fahrten.findIndex(y=>y.id===fid);
+        if(i>=0&&!db.fahrten[i].kmE){const ex=db.fahrten[i].expenseId;db.fahrten.splice(i,1);syncBookedExpense(ex);}}});
+      x.fahrtId=f.id;if(x.ents)x.entsFahrtId=f.id;if(J.length===1)x.fahrtKm=km;});
+    syncBookedExpense(f.expenseId);
+    ui.kmRun=null;uiSave();save();closeSheets();render();toast(`${fmtKm(km)} gefahren · gespeichert`);};
+}
 /* Hinweis auf der Startseite, solange eine Fahrt läuft */
 function lbRunCard(){
+  const k=ui.kmRun;
+  if(k&&!lbActive()){const j=db.jobs.find(x=>x.id===k.jobId);
+    return `<div class="card" style="--stripe:var(--accent)"><div class="lbl">Fahrt läuft</div>
+    <div class="hint" style="margin-top:4px">Seit ${esc(k.zeitA)} Uhr · Start bei ${fmtKm(k.kmA)}${j?' · '+esc(jobName(j)):''}</div>
+    <button class="btn pri full" style="margin-top:10px" onclick="kmEnde()">Zurück · km-Stand eintragen</button></div>`;}
   const r=ui.lbRun;if(!r||!lbActive())return '';
   const j=r.jobId?db.jobs.find(x=>x.id===r.jobId):null;
   return `<div class="card" style="--stripe:var(--accent)"><div class="lbl">Fahrt läuft</div>
@@ -9151,7 +9218,9 @@ function jobDone(id){
   const c=j.customerId?cust(j.customerId):null,hat=!!(c&&c.id);
   const fb=db.settings.fahrtenbuch||{},lb=lbActive()&&j.date>=lbStart();
   const km=j.fahrt!==false?(+j.fahrtKm||(hat?+c.kmRoundtrip||0:0)):0;
+  const kr=!lb&&ui.kmRun&&ui.kmRun.date===j.date&&j.fahrt!==false;
   const fahrtTxt=lb?'Danach trägst du die Fahrt mit Kilometerstand ins Fahrtenbuch ein.'
+    :kr?'Die Fahrt läuft noch. Wenn du zurück bist, trägst du auf „Heute“ den km-Stand ein; dann stehen die echten km statt der geschätzten im Fahrtenbuch.'
     :j.fahrt!==false?`Ins Fahrtenbuch kommt eine Fahrt über ${km?nf.format(km)+' km':'? km'}${j.ents?' und eine Entsorgungsfahrt':''}.`:'Es wird keine Fahrt eingetragen.';
   const el=sheet('Auftrag abschließen',`<div class="card"><div class="nm" style="font-weight:800;font-size:17px">${esc(jobName(j))}</div>
       <div class="hint">${dDE(j.date)}${hat&&j.titel?' · '+esc(c.name):''}${+j.ist?' · '+nf.format(+j.ist)+' Std erfasst':''}</div></div>
@@ -9181,7 +9250,8 @@ function jobDone(id){
       j.sig={img:o.toDataURL('image/jpeg',.7),name:el.querySelector('#jd_name').value.trim(),ts:Date.now()};
     }
     j.status='erledigt';j.erledigtAm=today();
-    const dop=!lb&&j.fahrt!==false&&!j.fahrtId&&j.customerId&&db.fahrten.some(f=>f.customerId===j.customerId&&f.date===j.date&&!isDepFahrt(f));
+    if(kr){const r=ui.kmRun;r.jobs=[...new Set([...(r.jobs||[]),r.jobId,j.id].filter(Boolean))];uiSave();}
+    const dop=kr||!lb&&j.fahrt!==false&&!j.fahrtId&&j.customerId&&db.fahrten.some(f=>f.customerId===j.customerId&&f.date===j.date&&!isDepFahrt(f));
     const n=dop?0:jobFahrtenSchreiben(j);
     save();closeSheets();render();
     celebrate('Auftrag erledigt');
@@ -9194,7 +9264,7 @@ function jobDone(id){
         lbEdit(null,{date:j.date,art:'betrieb',customerId:hat?c.id:'',partner:hat?custName(c):'',ziel:jobAdresse(j)||'',zweck:j.titel||'Gartenpflege',jobId:j.id,_vorschlag:lbStand(fzAkt().id)+(km||0)});
         toast('Kilometerstand eintragen');
       }else{
-        toast(n?`Erledigt · ${n===1?'Fahrt':n+' Fahrten'} eingetragen`:'Erledigt');
+        toast(kr?'Erledigt · km folgen beim Zurückkommen':n?`Erledigt · ${n===1?'Fahrt':n+' Fahrten'} eingetragen`:'Erledigt');
         bewertungFrage(j);
       }
     },900);
