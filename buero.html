@@ -1297,7 +1297,8 @@ const DEFAULT={
  customers:[],items:[],invoices:[],offers:[],expenses:[],assets:[],times:[],iab:[],fahrten:[],jobs:[],recurring:[],aufgaben:[]
 };
 const SEED_ITEMS=[
- {name:'An- Abfahrt und Besorgungsfahrt',unit:'Stk',price:85},
+ {name:'An- und Abfahrt inkl. Verschleiß und Betriebskosten',unit:'Pauschal',price:55},
+ {name:'Besorgungsfahrt (Material, Entsorgung)',unit:'Pauschal',price:30},
  {name:'Arbeitsstunde Gartenpflege',unit:'Std',price:45},
  {name:'Rasen mähen inkl. Abtransport',unit:'Std',price:45},
  {name:'Heckenschnitt',unit:'lfm',price:12},
@@ -1967,7 +1968,7 @@ function fahrtRow(f){
   const booked=isBookedFahrt(f),warn=!(+f.km>0);
   return `<div class="item" onclick="editFahrt('${f.id}')">
     <div class="g"><div class="nm">${esc(f.nach||'')}</div>
-      <div class="mt">${dDE(f.date)} · ${esc(f.anlass||(c?c.name:''))}${f.auto?' · Auto':''}${booked?' · Verbucht':''}</div></div>
+      <div class="mt">${dDE(f.date)} · ${esc(f.anlass||(c?c.name:''))}${f.kmE?' · km-Stand':f.auto?' · Auto':''}${booked?' · Verbucht':''}</div></div>
     <div style="text-align:right"><div class="amt mono" style="${warn?'color:var(--clay)':''}">${warn?'km fehlt':nf.format(f.km||0)+' km'}</div></div></div>`;
 }
 function vFahrten(){
@@ -2020,7 +2021,10 @@ function editFahrt(id){
     <label class="f"><span>Datum</span><input id="f_date" type="date" value="${f.date}"></label>
     <label class="f"><span>Von</span><input id="f_von" value="${esc(f.von)}"></label>
     <label class="f"><span>Nach</span><input id="f_nach" value="${esc(f.nach)}"></label>
-    <label class="f"><span>Kilometer</span><input id="f_km" type="number" step="0.1" inputmode="decimal" value="${f.km||''}"></label>
+    <div class="grid2"><label class="f"><span>km-Stand Beginn</span><input id="f_ka" class="tacho" type="number" inputmode="numeric" value="${f.kmA?Math.round(f.kmA):''}" placeholder="optional"></label>
+      <label class="f"><span>km-Stand Ende</span><input id="f_ke" class="tacho" type="number" inputmode="numeric" value="${f.kmE?Math.round(f.kmE):''}" placeholder="optional"></label></div>
+    <label class="f"><span>Gefahrene Kilometer</span><input id="f_km" type="number" step="0.1" inputmode="decimal" value="${f.km||''}"></label>
+    <div class="hint" style="margin:-4px 2px 8px">Mit beiden km-Ständen rechnet die App die Kilometer selbst aus. Sonst trägst du die gefahrenen km direkt ein.</div>
     <label class="f"><span>Anlass</span><input id="f_anlass" value="${esc(f.anlass||'')}" placeholder="z. B. Kundentermin, Materialkauf"></label>
     <label class="f"><span>Kunde (optional)</span><select id="f_cust"><option value="">— keiner —</option>
       ${db.customers.map(c=>`<option value="${c.id}" ${c.id===f.customerId?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
@@ -2030,12 +2034,18 @@ function editFahrt(id){
     :(id?`<button class="btn full" style="margin-top:8px" onclick="bookFahrt('${id}')">Als Ausgabe verbuchen${f.km?` (${eur(f.km*0.3)})`:''}</button>`:'')}
   <button class="btn pri full" style="margin-top:8px" id="f_save">Sichern</button>
   ${id?`<button class="btn full dan" style="margin-top:8px" onclick="delFahrt('${id}')">Löschen</button>`:''}`);
+  const fKmCalc=()=>{const a=num(el.querySelector('#f_ka').value),e=num(el.querySelector('#f_ke').value);if(a>0&&e>a)el.querySelector('#f_km').value=Math.round(e-a);};
+  el.querySelector('#f_ka').oninput=fKmCalc;el.querySelector('#f_ke').oninput=fKmCalc;
   el.querySelector('#f_save').onclick=()=>{
+    const ka=num(el.querySelector('#f_ka').value),ke=num(el.querySelector('#f_ke').value);
+    if(ka>0&&ke>0&&ke<=ka){toast('km-Stand Ende muss größer als Beginn sein');return;}
+    f.kmA=ka>0?ka:'';f.kmE=ke>0?ke:'';
     f.date=el.querySelector('#f_date').value||today();
     f.von=el.querySelector('#f_von').value.trim();
     f.nach=el.querySelector('#f_nach').value.trim();
-    f.km=num(el.querySelector('#f_km').value);
+    f.km=f.kmA&&f.kmE?Math.round(f.kmE-f.kmA):num(el.querySelector('#f_km').value);
     f.anlass=el.querySelector('#f_anlass').value.trim();
+    if(f.kmA&&f.kmE)f.kmManual=true;
     f.customerId=el.querySelector('#f_cust').value;
     if(f.auto)f.kmManual=true;   // von Hand angefasst: beim Speichern der Rechnung nicht mehr überschreiben
     const i=db.fahrten.findIndex(x=>x.id===f.id);
@@ -2893,7 +2903,7 @@ function drawEditor(){
       <label class="f"><span>${isInv?'Rechnungsdatum':'Angebotsdatum'}</span><input type="date" value="${cur.date}" onchange="cur.date=this.value;drawEditor()"></label>
     </div>
     <label class="f"><span>Kunde</span><select onchange="cur.customerId=this.value;drawEditor()">
-      ${db.customers.map(c=>`<option value="${c.id}" ${c.id===cur.customerId?'selected':''}>${esc(c.name)}</option>`).join('')||'<option value="">— keiner angelegt —</option>'}
+      ${db.customers.filter(c=>!c.archiviert||c.id===cur.customerId).map(c=>`<option value="${c.id}" ${c.id===cur.customerId?'selected':''}>${esc(c.name)}</option>`).join('')||'<option value="">— keiner angelegt —</option>'}
     </select></label>
     <button class="btn sm" onclick="editCustomer(null,cb=>{cur.customerId=cb;drawEditor()})">Neuen Kunden anlegen</button>
     ${isInv?`<div style="margin-top:12px">
@@ -2960,7 +2970,7 @@ function drawEditor(){
 
   <div class="card">
     <div class="kv"><span>Netto</span><b class="mono" id="sumNet">${eur(t.net)}</b></div>
-    ${cur.klein?`<div class="kv"><span class="hint">Umsatzsteuer nicht erhoben gemäß §19 UStG</span><b class="mono">0,00 €</b></div>`
+    ${cur.klein?`<div class="kv"><span class="hint">${KU_HINWEIS}</span><b class="mono">0,00 €</b></div>`
       :`<div class="kv"><span>zzgl. ${cur.vat}% USt</span><b class="mono" id="sumVat">${eur(t.vat)}</b></div>`}
     <div class="kv" style="font-size:17px"><b>Gesamt</b><b class="mono" id="sumGross">${eur(t.gross)}</b></div>
     <label class="row" style="margin-top:10px;gap:8px"><input type="checkbox" style="width:auto" ${cur.klein?'checked':''} onchange="cur.klein=this.checked;drawEditor()"><span class="hint">Kleinunternehmer §19 (keine USt ausweisen)</span></label>
@@ -3179,7 +3189,7 @@ function viewDoc(type,id){
   <div class="card">
     ${d.positions.map(x=>`<div class="kv" style="align-items:flex-start"><span>${esc(x.desc)}<br><span class="hint mono">${nf.format(x.qty)} ${esc(x.unit)} × ${eur(x.price)}</span>${x.comment?`<br><span class="hint" style="font-style:italic">${nl2br(x.comment)}</span>`:''}</span><b class="mono">${eur(x.qty*x.price)}</b></div>`).join('')}
     <div class="kv"><span>Netto</span><b class="mono">${eur(t.net)}</b></div>
-    ${d.klein?'<div class="hint" style="padding:6px 0">Umsatzsteuer nicht erhoben gemäß §19 UStG.</div>':`<div class="kv"><span>USt ${d.vat}%</span><b class="mono">${eur(t.vat)}</b></div>`}
+    ${d.klein?`<div class="hint" style="padding:6px 0">${KU_HINWEIS}</div>`:`<div class="kv"><span>USt ${d.vat}%</span><b class="mono">${eur(t.vat)}</b></div>`}
     ${(d.abzuege||[]).map(a=>`<div class="kv"><span class="hint">abzüglich ${esc(a.number)} vom ${dDE(a.date)}</span><b class="mono">−${eur(a.gross)}</b></div>`).join('')}
     ${abzuegeSum(d)?`<div class="kv" style="font-size:17px"><b>Zahlbetrag</b><b class="mono">${eur(payable(d))}</b></div>`:''}
   </div>
@@ -3201,7 +3211,7 @@ function viewDoc(type,id){
     <button class="btn full pri" style="margin-top:10px" onclick="offerToInvoice('${d.id}')">In Rechnung umwandeln</button></div>`}
   ${isInv?mahnCard(d,st):''}
   <div class="grid2">
-    <button class="btn" onclick="editDoc('${type}','${d.id}')">Bearbeiten</button>
+    ${isInv&&!d.draft?`<button class="btn" onclick="korrigieren('${d.id}')">Korrigieren</button>`:`<button class="btn" onclick="editDoc('${type}','${d.id}')">Bearbeiten</button>`}
     <button class="btn pri" onclick="downloadPdf('${type}','${d.id}','${isInv?'Rechnung':'Angebot'}')">PDF speichern</button>
   </div>
   <div class="grid2" style="margin-top:8px">
@@ -3304,12 +3314,13 @@ function delPay(id,i){const d=db.invoices.find(x=>x.id===id);const p=d.payments.
 function setOfferStatus(id,s){const o=db.offers.find(x=>x.id===id);o.status=s;save();closeSheets();render();}
 function offerToInvoice(id){
   const o=db.offers.find(x=>x.id===id),s=db.settings;
+  /* Seit 5.1: als Entwurf, damit Leistungsdatum und Positionen vor dem Festschreiben geprüft werden */
   const inv={...freshFromDoc(o),id:uid(),number:s.numbers.invPrefix+s.numbers.invNext,date:today(),
     deliveryDate:today(),dueDate:addDays(today(),s.defaults.paymentDays),
-    intro:s.defaults.introInv,status:undefined,fromOffer:o.number};
-  db.invoices.push(inv);s.numbers.invNext++;o.status='angenommen';
-  autoFahrtenForInvoice(inv);
-  save();closeSheets();go('inv');toast('Rechnung '+inv.number+' erstellt');
+    intro:s.defaults.introInv,status:undefined,fromOffer:o.number,draft:true};
+  db.invoices.push(inv);o.status='angenommen';
+  save();closeSheets();go('inv');editDoc('invoice',inv.id);
+  toast('Rechnungsentwurf erstellt: Leistungsdatum eintragen, dann festschreiben');
 }
 function delDoc(type,id){
   const key=type==='invoice'?'invoices':'offers',arr=db[key];
@@ -4052,7 +4063,7 @@ async function genPdf(type,id,kind){
   doc.text(co.name+'  -  '+co.street+'  -  '+co.zip+' '+co.city,L,60);
   doc.setDrawColor(150);doc.setLineWidth(.1);doc.line(L,61.4,L+78,61.4);
   doc.setFontSize(10.5);doc.setTextColor(20);
-  addrLines(c).forEach((x,i)=>doc.text(String(x||''),L,68+i*5));
+  (d.empf||addrLines(c)).forEach((x,i)=>doc.text(String(x||''),L,68+i*5));
 
   // Meta-Block rechts
   const MX=122;
@@ -4134,10 +4145,11 @@ async function genPdf(type,id,kind){
     doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(9.3);
     doc.text(label,C.desc,y);doc.text(val,C.tot,y,{align:'right'});y+=7;
   };
-  sumRow('Gesamtbetrag netto',money(t.net),false);
-  if(d.klein){doc.setFont('helvetica','normal');doc.text('Umsatzsteuer nicht erhoben gemäß §19UStG.',C.desc,y);y+=6;}
-  else sumRow('zzgl. '+d.vat+'% Umsatzsteuer',money(t.vat),false);
-  sumRow('Gesamtbetrag brutto',money(t.gross),true);
+  if(d.klein){sumRow('Gesamtbetrag',money(t.gross),true);
+    doc.setFont('helvetica','normal');doc.splitTextToSize(KU_HINWEIS,W-12).forEach(l=>{doc.text(l,C.desc,y);y+=4.6;});y+=1.4;}
+  else{sumRow('Gesamtbetrag netto',money(t.net),false);
+    sumRow('zzgl. '+d.vat+'% Umsatzsteuer',money(t.vat),false);
+    sumRow('Gesamtbetrag brutto',money(t.gross),true);}
   (d.abzuege||[]).forEach(a=>sumRow('abzüglich Abschlagsrechnung '+a.number+' vom '+dDE(a.date),'-'+money(a.gross),false));
   if(isInv&&abzuegeSum(d))sumRow('Zahlbetrag',money(payable(d)),true);
   if(isInv&&paid(d)>0)sumRow('Noch offen',money(offenOf(d)),true);
@@ -4154,6 +4166,7 @@ async function genPdf(type,id,kind){
     : ['Zahlungsbedingungen: Zahlung innerhalb von '+db.settings.defaults.paymentDays+' Tagen ab Rechnungseingang ohne Abzüge.','',
        'Bitte überweisen Sie den Rechnungsbetrag unter Angabe der Rechnungsnummer auf das unten angegebene Konto.',
        'Der Rechnungsbetrag ist bis zum '+dDE(d.dueDate)+' fällig.'];
+  if(isInv&&!isMahn&&!d.stornoVon&&verzugHinweisFuer(d))payLines.push('',VERZUG_HINWEIS);
   if(d.note)payLines.push('',...doc.splitTextToSize(d.note,W-60));
   doc.setFont('helvetica','normal');doc.setFontSize(9.3);doc.setTextColor(20);
   const textMaxW=isInv&&co.iban?W-36:W;
@@ -4212,7 +4225,7 @@ function docHTML(d,type,kind){
   <div class="addr">
     <div style="flex:1">
       <div class="sender">${esc(co.name)} &nbsp;-&nbsp; ${esc(co.street)} &nbsp;-&nbsp; ${esc(co.zip)} ${esc(co.city)}</div>
-      <div style="font-size:10.5pt;line-height:1.5">${addrLines(c).map(esc).join('<br>')}</div>
+      <div style="font-size:10.5pt;line-height:1.5">${(d.empf||addrLines(c)).map(esc).join('<br>')}</div>
     </div>
     <div class="meta">
       <div class="h"><span>${isInv?(d.art==='abschlag'?'Abschlags-Nr.':(d.art==='schluss'?'Schluss-Nr.':'Rechnungs-Nr.')):'Angebots-Nr.'}</span><span>${esc(d.number)}</span></div>
@@ -4223,7 +4236,7 @@ function docHTML(d,type,kind){
     </div>
   </div>
   <h1>${esc(kind==='Rechnung'?artLabel(d):kind)} Nr. ${esc(d.number)}</h1>
-  <div>Sehr geehrte Damen und Herren,</div>
+  <div>${esc(anredeOf(c))}</div>
   <div style="margin-top:4mm">${nl2br(intro)}</div>
   ${isInv&&leistungsOrt(d)?`<div style="margin-top:3mm">${esc(leistungsOrt(d))}</div>`:''}
   ${isInv&&leistungsZeile(d)?`<div style="margin-top:3mm">${esc(leistungsZeile(d))}</div>`:''}
@@ -4231,10 +4244,11 @@ function docHTML(d,type,kind){
     <tr><th style="width:8mm">Pos.</th><th>Beschreibung</th><th style="width:20mm">Menge</th><th style="width:24mm">Einzelpreis</th><th style="width:26mm">Gesamtpreis</th></tr>
     ${d.positions.map((p,i)=>`<tr><td>${i+1}.</td><td>${esc(p.desc)}${p.comment?`<br><span style="font-style:italic;font-weight:400;font-size:8.3pt;color:#555">${nl2br(p.comment)}</span>`:''}</td><td>${nf.format(p.qty)} ${esc(p.unit)}</td>
       <td>${nf.format(p.price)} EUR</td><td>${nf.format(p.qty*p.price)} EUR</td></tr>`).join('')}
-    <tr class="sum"><td></td><td colspan="3">Gesamtbetrag netto</td><td>${nf.format(t.net)} EUR</td></tr>
-    ${d.klein?`<tr><td></td><td colspan="4" style="text-align:left;padding-top:2mm">Umsatzsteuer nicht erhoben gemäß §19UStG.</td></tr>`
-      :`<tr class="sum"><td></td><td colspan="3">zzgl. ${d.vat}% Umsatzsteuer</td><td>${nf.format(t.vat)} EUR</td></tr>`}
-    <tr class="sum b"><td></td><td colspan="3">Gesamtbetrag brutto</td><td>${nf.format(t.gross)} EUR</td></tr>
+    ${d.klein?`<tr class="sum b"><td></td><td colspan="3">Gesamtbetrag</td><td>${nf.format(t.gross)} EUR</td></tr>
+      <tr><td></td><td colspan="4" style="text-align:left;padding-top:2mm">${KU_HINWEIS}</td></tr>`
+      :`<tr class="sum"><td></td><td colspan="3">Gesamtbetrag netto</td><td>${nf.format(t.net)} EUR</td></tr>
+      <tr class="sum"><td></td><td colspan="3">zzgl. ${d.vat}% Umsatzsteuer</td><td>${nf.format(t.vat)} EUR</td></tr>
+      <tr class="sum b"><td></td><td colspan="3">Gesamtbetrag brutto</td><td>${nf.format(t.gross)} EUR</td></tr>`}
     ${(d.abzuege||[]).map(a=>`<tr class="sum"><td></td><td colspan="3">abzüglich Abschlagsrechnung ${esc(a.number)} vom ${dDE(a.date)}</td><td>−${nf.format(a.gross)} EUR</td></tr>`).join('')}
     ${isInv&&abzuegeSum(d)?`<tr class="sum b"><td></td><td colspan="3">Zahlbetrag</td><td>${nf.format(payable(d))} EUR</td></tr>`:''}
     ${paid(d)>0&&isInv?`<tr class="sum b"><td></td><td colspan="3">Noch offen</td><td>${nf.format(openAmt)} EUR</td></tr>`:''}
@@ -4244,7 +4258,7 @@ function docHTML(d,type,kind){
     Zahlungsziel: ${dDE(addDays(today(),10))}.</p>`
     :isInv?`<p>Zahlungsbedingungen: Zahlung innerhalb von ${db.settings.defaults.paymentDays} Tagen ab Rechnungseingang ohne Abzüge.</p>
     <p>Bitte überweisen Sie den Rechnungsbetrag unter Angabe der Rechnungsnummer auf das unten angegebene Konto.<br>
-    Der Rechnungsbetrag ist bis zum ${dDE(d.dueDate)} fällig.</p>`
+    Der Rechnungsbetrag ist bis zum ${dDE(d.dueDate)} fällig.</p>${!d.stornoVon&&verzugHinweisFuer(d)?`<p>${VERZUG_HINWEIS}</p>`:''}`
     :`<p>Dieses Angebot ist gültig bis zum ${dDE(d.dueDate)}. Über Ihren Auftrag freue ich mich.</p>`}
     ${d.note?`<p>${nl2br(d.note)}</p>`:''}
     <p style="margin-top:8mm">Mit freundlichen Grüßen<br>${esc(co.owner)}</p>
@@ -4260,7 +4274,7 @@ function shareText(type,id){
   const d=(type==='invoice'?db.invoices:db.offers).find(x=>x.id===id),t=totals(d),co=db.settings.company;
   const txt=`${type==='invoice'?'Rechnung':'Angebot'} ${d.number} vom ${dDE(d.date)}\n\n`+
     d.positions.map(p=>`• ${p.desc} — ${nf.format(p.qty)} ${p.unit} × ${eur(p.price)} = ${eur(p.qty*p.price)}${p.comment?`\n  ${p.comment}`:''}`).join('\n')+
-    `\n\nGesamt: ${eur(t.gross)}${d.klein?'\nUmsatzsteuer nicht erhoben gemäß §19 UStG.':''}`+
+    `\n\nGesamt: ${eur(t.gross)}${d.klein?'\n'+KU_HINWEIS:''}`+
     (type==='invoice'?`\nZahlbar bis ${dDE(d.dueDate)}\nIBAN ${co.iban}`:`\nGültig bis ${dDE(d.dueDate)}`)+
     `\n\n${co.name} · ${co.owner}`;
   if(navigator.share)navigator.share({text:txt});else{navigator.clipboard.writeText(txt);toast('In Zwischenablage kopiert');}
@@ -5961,23 +5975,34 @@ Das Bild des Originalbelegs wird unveränderlich zum Datensatz gespeichert und m
 exportiert. Papieroriginale werden zusätzlich chronologisch abgelegt.
 
 4. BELEGSICHERUNG UND UNVERÄNDERBARKEIT
-Rechnungen erhalten eine fortlaufende, lückenlose Nummer. Eine erteilte Rechnung
-wird nicht gelöscht oder inhaltlich geändert; Korrekturen erfolgen ausschließlich
-über eine Stornorechnung mit eigener Nummer und anschließende Neuberechnung.
-Die Anwendung prüft den Nummernkreis laufend auf Lücken und Doppelvergaben.
+Rechnungen erhalten eine fortlaufende, lückenlose Nummer. Die Nummer wird erst
+beim Festschreiben vergeben. Eine festgeschriebene Rechnung kann in der Anwendung
+weder bearbeitet noch gelöscht noch in einen Entwurf zurückverwandelt werden;
+Korrekturen erfolgen ausschließlich über eine Stornorechnung mit eigener Nummer
+und eine neue Rechnung. Beim Festschreiben wird die Rechnung einmalig als PDF
+erzeugt, mit SHA-256-Prüfsumme versehen und unverändert archiviert; erneut
+versendet wird stets dieses archivierte PDF. Vor dem Festschreiben prüft die
+Anwendung die Pflichtangaben. Kunden mit Belegen werden archiviert, nicht
+gelöscht. Die Anwendung prüft den Nummernkreis laufend auf Lücken und
+Doppelvergaben. Für Rechnungen, die vor Version 5.1 festgeschrieben wurden,
+ist das Archiv-PDF nachträglich erzeugt und als solches gekennzeichnet.
 
 5. AUFZEICHNUNG DER FAHRTEN
 Betriebsfahrten werden mit Datum, Start, Ziel, Anlass und Kilometern erfasst und
 mit der gesetzlichen Pauschale von 0,30 EUR je Kilometer angesetzt.
 
 6. DATENSICHERUNG
-Der Datenbestand wird laufend automatisch sowie zusätzlich manuell gesichert.
+Der Datenbestand wird täglich automatisch auf dem Gerät gesichert und regelmäßig
+als vollständiges Paket (Daten, Rechnungs-PDFs, Belegbilder) außerhalb des Geräts
+abgelegt; die Anwendung erinnert spätestens nach 7 Tagen daran.
 Jahresarchive werden als vollständiges Paket aus Belegbildern, Verzeichnissen
 im CSV-Format und Rohdaten im JSON-Format abgelegt.
 
 7. AUFBEWAHRUNG
-Rechnungen, Belege und diese Dokumentation werden zehn Jahre aufbewahrt,
-sonstige Geschäftsunterlagen acht Jahre. Die Lesbarkeit der exportierten
+Rechnungen und sonstige Buchungsbelege werden acht Jahre aufbewahrt,
+Aufzeichnungen, Jahresabschlüsse und diese Dokumentation zehn Jahre,
+empfangene und versandte Geschäftsbriefe sechs Jahre (§ 147 AO, § 14b UStG).
+Die Frist beginnt mit Ablauf des Kalenderjahres. Die Lesbarkeit der exportierten
 Formate (JPEG, CSV, JSON, TXT) ist ohne die erzeugende Anwendung gegeben.
 
 8. INHALT DIESES ARCHIVS
@@ -7164,7 +7189,7 @@ function vMore(){
     ${tile(P.doc,'c-clay','E-Rechnung',{firmen:'ZUGFeRD für Firmenkunden',immer:'ZUGFeRD in jedem PDF',nie:'aus'}[einv().mode],'openEinv()')}
     ${tile(P.phoneapp,'c-violet','Als App installieren','Icon auf dem Homescreen','installApp()')}
   </div>
-  <div class="hint" style="text-align:center;margin:16px 0 4px">Garten Flo · Büro ${APP_VERSION} · Alle Daten liegen lokal auf diesem Gerät.<br>Rechnungen und Belege 10 Jahre aufbewahren.</div>`;
+  <div class="hint" style="text-align:center;margin:16px 0 4px">Garten Flo · Büro ${APP_VERSION} · Alle Daten liegen lokal auf diesem Gerät.<br>Rechnungen und Belege 8 Jahre, Bücher 10 Jahre aufbewahren.</div>`;
 }
 
 /* ---------- Leistungskatalog als eigene Seite ---------- */
@@ -7215,6 +7240,7 @@ function redrawCustomers(){
   const q=(document.getElementById('custq')||{}).value||'',s=q.toLowerCase().trim();
   const rows=db.customers.map(c=>({c,rev:custPaid(c.id),open:custOpen(c.id),last:custLast(c.id)}));
   let list=rows.filter(({c})=>!s||(custName(c)+' '+(c.company||'')+' '+(c.street||'')+' '+(c.zip||'')+' '+(c.city||'')+' '+(c.phone||'')+' '+(c.email||'')+' '+(c.notes||'')+' '+c.number).toLowerCase().includes(s));
+  list=custFilter==='archiv'?list.filter(r=>r.c.archiviert):list.filter(r=>!r.c.archiviert);
   if(custFilter==='offen')list=list.filter(r=>r.open>0.004);
   if(custFilter==='termin')list=list.filter(r=>r.c.nextVisit);
   if(custFilter==='inaktiv'){const lim=addDays(today(),-365);list=list.filter(r=>!r.last||r.last<lim);}
@@ -7222,7 +7248,7 @@ function redrawCustomers(){
   list.sort(sorter);
   document.getElementById('custchips').innerHTML=
     chips(['name','umsatz','zuletzt'],custSort,'setCustSort',{name:'A–Z',umsatz:'Umsatz',zuletzt:'Zuletzt aktiv'})+
-    chips(['alle','offen','termin','inaktiv'],custFilter,'setCustFilter',{alle:`Alle (${db.customers.length})`,offen:'Offene Posten',termin:'Mit Termin',inaktiv:'Über 1 Jahr inaktiv'});
+    chips(['alle','offen','termin','inaktiv',...(db.customers.some(c=>c.archiviert)?['archiv']:[])],custFilter,'setCustFilter',{alle:`Alle (${db.customers.filter(c=>!c.archiviert).length})`,offen:'Offene Posten',termin:'Mit Termin',inaktiv:'Über 1 Jahr inaktiv',archiv:'Archiviert'});
   box.innerHTML=list.length?`<div class="card" style="padding:4px 14px">${list.map(({c,rev,open,last})=>`<div class="item" onclick="openCustomer('${c.id}')">
       ${avatar(c)}<div class="g"><div class="nm">${hl(c.last?c.last+(c.first?', '+c.first:''):custName(c),q)}</div>
       <div class="mt">${c.company&&c.last?hl(c.company,q)+' · ':''}${c.city?hl(c.city,q)+' · ':''}${last?'zuletzt '+dDE(last):'noch keine Leistung'}</div></div>
@@ -7929,7 +7955,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.0.1';
+const APP_VERSION5='5.1.0';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -8052,7 +8078,7 @@ function openCustomers(){closeSheets();go('kunden');}
 let wOff=0;
 function vHeute(){
   const t=today();
-  return nextCard()+weekPlan(true)+brauchtDich()+pflegeHinweis()+geldZeile();
+  return lbRunCard()+nextCard()+weekPlan(true)+brauchtDich()+pflegeHinweis()+geldZeile();
 }
 function nextCard(){
   const t=today();
@@ -8077,6 +8103,7 @@ function nextCard(){
       <button class="btn" onclick="unterwegs('${j.id}')" ${c&&telOf(c)?'':'disabled style="opacity:.45"'}>${icoSvg(IP.msg)}Unterwegs</button>
       <button class="btn" onclick="timerToggle('${j.id}')">${tm?'■ Stopp':icoSvg(IP.play)+'Start'}</button>
     </div>
+    ${j.date===t&&j.fahrt!==false&&!j.lbId&&!ui.lbRun&&!ui.kmRun?`<button class="btn full" style="margin-top:8px" onclick="lbStartFahrt('${j.id}')">${icoSvg(IP.car)}Losfahren · km-Stand eintragen</button>`:''}
     ${j.date<=t?`<button class="btn pri full" onclick="jobDone('${j.id}')">Erledigt</button>`:''}
   </div>`;
 }
@@ -8482,12 +8509,12 @@ function pflegeStatus(c,task,y){
 function pflegeOffeneKunden(m){
   const y=new Date().getFullYear(),L=[];
   pflegeTasks(m).forEach(task=>{if(task.k==='betrieb')return;
-    db.customers.filter(c=>gartenOf(c).includes(task.k)).forEach(c=>{if(pflegeStatus(c,task,y).s==='offen')L.push({c,task});});});
+    db.customers.filter(c=>!c.archiviert&&gartenOf(c).includes(task.k)).forEach(c=>{if(pflegeStatus(c,task,y).s==='offen')L.push({c,task});});});
   return L;
 }
 function vPflege(){
   const m=pfM,cm=new Date().getMonth()+1,y=new Date().getFullYear()+(m<cm-2?1:0);
-  const mitProfil=db.customers.filter(c=>gartenOf(c).length).length;
+  const mitProfil=db.customers.filter(c=>!c.archiviert&&gartenOf(c).length).length;
   const strip=`<div class="mstrip">${MKURZ.map((n,i)=>`<button class="${i+1===m?'on':''} ${i+1===cm?'cur':''}" onclick="pfM=${i+1};pfOpen=null;render()" aria-label="${MONTHS[i]}">${n.slice(0,1)}</button>`).join('')}</div>`;
   const nsg=m>=3&&m<=9
     ?`<div class="nsg"><b>Schonzeit 1. März bis 30. September</b> (§ 39 Abs. 5 BNatSchG): Hecken, Gebüsche und Gehölze nicht stark zurückschneiden, auf den Stock setzen oder roden. Erlaubt sind schonende Form- und Pflegeschnitte. Vorher auf Vogelnester prüfen, besetzte Nester sind ganzjährig geschützt. Obstbäume und Bäume im Garten sind ausgenommen, die Baumschutzsatzung der Gemeinde gilt trotzdem.</div>`
@@ -8499,7 +8526,7 @@ function vPflege(){
   const kats=Object.keys(byK).sort((a,b)=>Object.keys(PFK).indexOf(a)-Object.keys(PFK).indexOf(b));
   const body=kats.map(k=>{const kat=PFK[k];
     return byK[k].map(task=>{
-      const kunden=k==='betrieb'?[]:db.customers.filter(c=>gartenOf(c).includes(k)).sort((a,b)=>sortName(a)<sortName(b)?-1:1);
+      const kunden=k==='betrieb'?[]:db.customers.filter(c=>!c.archiviert&&gartenOf(c).includes(k)).sort((a,b)=>sortName(a)<sortName(b)?-1:1);
       const st=kunden.map(c=>({c,...pflegeStatus(c,task,y)}));
       const off=st.filter(x=>x.s==='offen');
       const tag=task.stark?'<span class="ptag w">nur Okt–Feb</span>':k==='betrieb'?'<span class="ptag i">Betrieb</span>':(kunden.length?`<span class="ptag ${off.length?'':'m'}">${off.length?off.length+' offen':'alle ✓'}</span>`:'');
@@ -8568,7 +8595,7 @@ function pflegePlanen(cid,tid,m,y){
 }
 function pflegeAllePlanen(tid,m,y){
   const task=PFLEGE.find(x=>x.id===tid);if(!task)return;
-  const off=db.customers.filter(c=>gartenOf(c).includes(task.k)&&pflegeStatus(c,task,y).s==='offen');
+  const off=db.customers.filter(c=>!c.archiviert&&gartenOf(c).includes(task.k)&&pflegeStatus(c,task,y).s==='offen');
   if(!off.length)return;
   if(!confirm(`${off.length} Aufträge „${task.t}“ anlegen?\n\nDie App verteilt sie auf Werktage mit gutem Wetter (höchstens drei pro Tag). Datum und Uhrzeit kannst du danach anpassen.`))return;
   off.forEach(c=>{const d=pflegeTag(m,y);
@@ -8578,7 +8605,7 @@ function pflegeAllePlanen(tid,m,y){
 }
 function pflegeAnschreiben(tid,y){
   const task=PFLEGE.find(x=>x.id===tid);if(!task)return;
-  const off=db.customers.filter(c=>gartenOf(c).includes(task.k)&&pflegeStatus(c,task,y).s==='offen');
+  const off=db.customers.filter(c=>!c.archiviert&&gartenOf(c).includes(task.k)&&pflegeStatus(c,task,y).s==='offen');
   nachrichten('Kunden anschreiben',off.map(c=>({c,text:`${anrede(c)}, jetzt ist die beste Zeit für: ${task.t}. Soll ich das in den nächsten Wochen bei Ihnen erledigen? Ich melde mich dann mit einem Termin. Viele Grüße, ${absender()}`})),
     'Text bei Bedarf anpassen und je Kunde senden.',task.t);
 }
@@ -8711,7 +8738,7 @@ function planEdit(id,cid,preset){
    ===================================================================== */
 function rundschreiben(){
   const y=new Date().getFullYear(),lim=addDays(today(),-730);
-  const kand=db.customers.filter(c=>(c.email||telOf(c))&&(gartenOf(c).length||(custLast(c.id)&&custLast(c.id)>=lim)))
+  const kand=db.customers.filter(c=>!c.archiviert&&(c.email||telOf(c))&&(gartenOf(c).length||(custLast(c.id)&&custLast(c.id)>=lim)))
     .sort((a,b)=>sortName(a)<sortName(b)?-1:1);
   const vorlage=db.settings.rundText||`{anrede},\n\ndie neue Gartensaison ${y} steht vor der Tür. Gerne kümmere ich mich auch dieses Jahr wieder um Ihren Garten: Rasenpflege, Heckenschnitt, Gehölzschnitt und Beetpflege.\n\nMelden Sie sich einfach kurz, dann reserviere ich Ihnen frühzeitig feste Termine.\n\nViele Grüße\n${db.settings.company.owner||''}\n${db.settings.company.name}${db.settings.company.phone?'\nTel. '+db.settings.company.phone:''}`;
   const el=sheet('Rundschreiben',`<div class="card">
@@ -8824,8 +8851,8 @@ function vFahrtenbuch(){
   const f=fzAkt();
   if(!f)return `<div class="card" style="--stripe:var(--accent)">
       <div class="lbl">Fahrtenbuch mit Kilometerstand</div>
-      <div style="font-family:var(--display);font-weight:700;font-size:26px;line-height:1.1;margin:6px 0">Finanzamtsfest statt geschätzt.</div>
-      <div class="hint">Jede Fahrt mit Tachostand am Anfang und Ende, lückenlos und fortlaufend nummeriert. Einträge werden nach ${LB_LOCKDAYS} Tagen festgeschrieben, Korrekturen nur mit Begründung und Protokoll. So verlangt es das Finanzamt.</div>
+      <div style="font-family:var(--display);font-weight:700;font-size:26px;line-height:1.1;margin:6px 0">Lückenlos statt geschätzt.</div>
+      <div class="hint">Jede Fahrt mit Tachostand am Anfang und Ende, lückenlos und fortlaufend nummeriert. Einträge werden nach ${LB_LOCKDAYS} Tagen festgeschrieben, Korrekturen nur mit Begründung und Protokoll. Ob das Finanzamt ein elektronisches Fahrtenbuch anerkennt, entscheidet es im Einzelfall: kläre mit dem Steuerberater, ob du es brauchst.</div>
       <button class="btn pri full" style="margin-top:12px" onclick="fzEdit()">Fahrtenbuch einrichten</button></div>
     <details class="card" data-k="lb-alt" style="padding:0"><summary style="padding:14px;cursor:pointer;list-style:none"><b>Bisherige Fahrten</b><span class="hint"> · ${db.fahrten.length} Einträge mit geschätzten km</span></summary>
       <div style="padding:0 14px 14px">${vFahrten()}</div></details>`;
@@ -8895,20 +8922,96 @@ function fzEdit(id){
     ui.fz=f.id;uiSave();save();closeSheets();render();toast(id?'Gesichert':'Fahrtenbuch läuft');};
 }
 /* ---------- Fahrt starten / beenden ---------- */
-function lbStartFahrt(){
-  const f=fzAkt();if(!f){fzEdit();return;}
-  const st=lbStand(f.id),now=new Date();
+function lbStartFahrt(jobId){
+  const f=fzAkt();if(!f){if(jobId){kmStart(jobId);return;}fzEdit();return;}
+  const j=jobId?db.jobs.find(x=>x.id===jobId):null,c=j&&j.customerId?cust(j.customerId):null;
+  const st=lbStand(f.id),now=new Date(),zielVor=j?(jobAdresse(j)||''):'';
   const el=sheet('Fahrt starten',`<div class="card">
-    <label class="f"><span>Kilometerstand jetzt</span><input id="ls_km" class="tacho" type="number" inputmode="numeric" value="${Math.round(st)}"></label>
+    ${j?`<div class="nm" style="font-weight:800;font-size:16px;margin-bottom:6px">${esc(jobName(j))}</div>`:''}
+    <label class="f"><span>Kilometerstand jetzt (Tacho)</span><input id="ls_km" class="tacho" type="number" inputmode="numeric" value="${Math.round(st)}"></label>
     <div class="hint">Laut Fahrtenbuch zuletzt ${fmtKm(st)}. Weicht der Tacho ab, trag den echten Stand ein; die Differenz wird als Lücke angezeigt.</div>
-    <label class="f" style="margin-top:8px"><span>Ziel (optional, geht auch am Ende)</span><input id="ls_z" placeholder="Kunde oder Adresse"></label></div>
+    <label class="f" style="margin-top:8px"><span>Ziel (optional, geht auch am Ende)</span><input id="ls_z" value="${esc(zielVor)}" placeholder="Kunde oder Adresse"></label></div>
+    <div class="hint" style="margin:0 2px 10px">Den Kilometerstand bei Ankunft trägst du mit „Angekommen“ oder spätestens bei „Erledigt“ ein.</div>
     <button class="btn pri full" id="ls_go">Los geht's</button>`);
   el.querySelector('#ls_go').onclick=()=>{
     const km=num(el.querySelector('#ls_km').value);if(!(km>0)){toast('Kilometerstand fehlt');return;}
-    ui.lbRun={fz:f.id,kmA:km,date:today(),zeitA:now.toTimeString().slice(0,5),ziel:el.querySelector('#ls_z').value.trim()};uiSave();
+    ui.lbRun={fz:f.id,kmA:km,date:today(),zeitA:now.toTimeString().slice(0,5),ziel:el.querySelector('#ls_z').value.trim(),
+      jobId:j?j.id:'',customerId:c&&c.id?c.id:'',partner:c&&c.id?custName(c):'',zweck:j?(j.titel||'Gartenpflege'):''};uiSave();
     closeSheets();render();toast('Fahrt läuft');};
 }
-function lbEnde(){const r=ui.lbRun;if(!r)return;lbEdit(null,{kmA:r.kmA,date:r.date,zeitA:r.zeitA,zeitE:new Date().toTimeString().slice(0,5),ziel:r.ziel,_run:true});}
+/* Laufende Fahrt in einen Eintrag überführen; zeitE leer lassen, wenn die Ankunftszeit nicht bekannt ist */
+function lbRunPreset(r,mitZeit){
+  const p={kmA:r.kmA,date:r.date,zeitA:r.zeitA,zeitE:mitZeit?new Date().toTimeString().slice(0,5):'',ziel:r.ziel,_run:true};
+  if(r.jobId||r.customerId){Object.assign(p,{art:'betrieb',customerId:r.customerId||'',partner:r.partner||'',zweck:r.zweck||'',jobId:r.jobId||''});}
+  return p;
+}
+function lbEnde(){const r=ui.lbRun;if(!r)return;lbEdit(null,lbRunPreset(r,true));}
+/* ---------- Einfacher Modus (ohne eingerichtetes Fahrtenbuch) ----------
+   Start-km beim Losfahren, End-km zurück am Betrieb: Die Auftragsfahrt bekommt die
+   echten km statt der geschätzten Entfernung. Keine Kette, keine Festschreibung. */
+const kmLetzter=()=>Math.max(0,...db.fahrten.map(f=>+f.kmE||0));
+function kmStart(jobId){
+  const j=db.jobs.find(x=>x.id===jobId);if(!j)return;
+  const st=kmLetzter();
+  const el=sheet('Losfahren',`<div class="card">
+    <div class="nm" style="font-weight:800;font-size:16px;margin-bottom:6px">${esc(jobName(j))}</div>
+    <label class="f"><span>Kilometerstand jetzt (Tacho)</span><input id="ks_km" class="tacho" type="number" inputmode="numeric" value="${st?Math.round(st):''}"></label>
+    ${st?`<div class="hint">Zuletzt eingetragen: ${fmtKm(st)}</div>`:''}</div>
+    <div class="hint" style="margin:0 2px 10px">Erst wenn du wieder zurück bist, trägst du auf „Heute“ den km-Stand ein. Fährst du unterwegs noch zu weiteren Kunden oder zur Deponie, drückst du dort nur „Erledigt“: Alles landet in einer Fahrt mit den echten km.</div>
+    <button class="btn pri full" id="ks_go">Los geht's</button>`);
+  el.querySelector('#ks_go').onclick=()=>{
+    const km=num(el.querySelector('#ks_km').value);if(!(km>0)){toast('Kilometerstand fehlt');return;}
+    ui.kmRun={jobId,kmA:km,date:today(),zeitA:new Date().toTimeString().slice(0,5)};uiSave();
+    closeSheets();render();toast('Fahrt läuft');};
+}
+function kmEnde(){
+  const r=ui.kmRun;if(!r)return;
+  const j=db.jobs.find(x=>x.id===r.jobId);
+  const el=sheet('Zurück',`<div class="card">
+    ${j?`<div class="nm" style="font-weight:800;font-size:16px;margin-bottom:6px">${esc(jobName(j))}</div>`:''}
+    <div class="hint">Start bei ${fmtKm(r.kmA)} um ${esc(r.zeitA)} Uhr</div>
+    <label class="f" style="margin-top:8px"><span>Kilometerstand jetzt (Tacho)</span><input id="ke_km" class="tacho" type="number" inputmode="numeric"></label>
+    <div class="hint" id="ke_info"></div></div>
+    <button class="btn pri full" id="ke_s">Fahrt speichern</button>
+    <button class="btn full" style="margin-top:8px" id="ke_x">Fahrt verwerfen</button>`);
+  const inp=el.querySelector('#ke_km');
+  inp.oninput=()=>{const e=num(inp.value);el.querySelector('#ke_info').innerHTML=e>r.kmA?`<b>${fmtKm(e-r.kmA)}</b> gefahren`:'';};
+  el.querySelector('#ke_x').onclick=()=>{if(!confirm('Laufende Fahrt verwerfen?'))return;ui.kmRun=null;uiSave();closeSheets();render();};
+  el.querySelector('#ke_s').onclick=()=>{
+    const e=num(inp.value);
+    if(!(e>r.kmA)){toast('km-Stand Ende muss größer als Beginn sein');return;}
+    if(e-r.kmA>2000){toast('Über 2.000 km? Bitte prüfen');return;}
+    const km=Math.round(e-r.kmA),co=db.settings.company;
+    /* Eine Fahrt für die ganze Tour: alle Aufträge, die unterwegs erledigt wurden */
+    const J=[...new Set([r.jobId,...(r.jobs||[])])].map(id=>db.jobs.find(x=>x.id===id)).filter(Boolean);
+    let f=J.map(x=>x.fahrtId&&db.fahrten.find(y=>y.id===x.fahrtId)).find(Boolean);
+    if(!f){f={id:uid(),date:r.date,von:`${co.street}, ${co.zip} ${co.city}`.trim()};db.fahrten.push(f);}
+    const k0=J.length&&J[0].customerId?cust(J[0].customerId):null;
+    const ziele=[...new Set(J.map(x=>jobAdresse(x)).filter(Boolean))];
+    if(J.some(x=>x.ents))ziele.push((db.settings.fahrtenbuch||{}).deponieName||'Mülldeponie');
+    Object.assign(f,{date:r.date,km,kmA:r.kmA,kmE:e,kmManual:true,auto:false,jobId:J.length?J[0].id:'',customerId:k0&&k0.id?k0.id:'',
+      nach:ziele.length?ziele.join(' · ')+' (und zurück)':(f.nach||''),
+      anlass:J.length?J.map(x=>{const c=x.customerId?cust(x.customerId):null;return (x.titel||'Auftrag')+(c&&c.id?' · '+c.name:'');}).join(' / '):(f.anlass||'')});
+    /* geschätzte Fahrten dieser Aufträge (auch Entsorgungsfahrten) gehen in der Tour auf */
+    J.forEach(x=>{[x.fahrtId,x.entsFahrtId].forEach(fid=>{if(fid&&fid!==f.id){const i=db.fahrten.findIndex(y=>y.id===fid);
+        if(i>=0&&!db.fahrten[i].kmE){const ex=db.fahrten[i].expenseId;db.fahrten.splice(i,1);syncBookedExpense(ex);}}});
+      x.fahrtId=f.id;if(x.ents)x.entsFahrtId=f.id;if(J.length===1)x.fahrtKm=km;});
+    syncBookedExpense(f.expenseId);
+    ui.kmRun=null;uiSave();save();closeSheets();render();toast(`${fmtKm(km)} gefahren · gespeichert`);};
+}
+/* Hinweis auf der Startseite, solange eine Fahrt läuft */
+function lbRunCard(){
+  const k=ui.kmRun;
+  if(k&&!lbActive()){const j=db.jobs.find(x=>x.id===k.jobId);
+    return `<div class="card" style="--stripe:var(--accent)"><div class="lbl">Fahrt läuft</div>
+    <div class="hint" style="margin-top:4px">Seit ${esc(k.zeitA)} Uhr · Start bei ${fmtKm(k.kmA)}${j?' · '+esc(jobName(j)):''}</div>
+    <button class="btn pri full" style="margin-top:10px" onclick="kmEnde()">Zurück · km-Stand eintragen</button></div>`;}
+  const r=ui.lbRun;if(!r||!lbActive())return '';
+  const j=r.jobId?db.jobs.find(x=>x.id===r.jobId):null;
+  return `<div class="card" style="--stripe:var(--accent)"><div class="lbl">Fahrt läuft</div>
+    <div class="hint" style="margin-top:4px">Seit ${esc(r.zeitA)} Uhr · Start bei ${fmtKm(r.kmA)}${j?' · '+esc(jobName(j)):r.ziel?' · '+esc(r.ziel):''}</div>
+    <button class="btn pri full" style="margin-top:10px" onclick="lbEnde()">Angekommen · km-Stand eintragen</button></div>`;
+}
 const lbNeu=preset=>{if(!lbActive()){fzEdit();return;}lbEdit(null,preset||{});};
 
 /* ---------- Eintrag bearbeiten ---------- */
@@ -9116,7 +9219,9 @@ function jobDone(id){
   const c=j.customerId?cust(j.customerId):null,hat=!!(c&&c.id);
   const fb=db.settings.fahrtenbuch||{},lb=lbActive()&&j.date>=lbStart();
   const km=j.fahrt!==false?(+j.fahrtKm||(hat?+c.kmRoundtrip||0:0)):0;
+  const kr=!lb&&ui.kmRun&&ui.kmRun.date===j.date&&j.fahrt!==false;
   const fahrtTxt=lb?'Danach trägst du die Fahrt mit Kilometerstand ins Fahrtenbuch ein.'
+    :kr?'Die Fahrt läuft noch. Wenn du zurück bist, trägst du auf „Heute“ den km-Stand ein; dann stehen die echten km statt der geschätzten im Fahrtenbuch.'
     :j.fahrt!==false?`Ins Fahrtenbuch kommt eine Fahrt über ${km?nf.format(km)+' km':'? km'}${j.ents?' und eine Entsorgungsfahrt':''}.`:'Es wird keine Fahrt eingetragen.';
   const el=sheet('Auftrag abschließen',`<div class="card"><div class="nm" style="font-weight:800;font-size:17px">${esc(jobName(j))}</div>
       <div class="hint">${dDE(j.date)}${hat&&j.titel?' · '+esc(c.name):''}${+j.ist?' · '+nf.format(+j.ist)+' Std erfasst':''}</div></div>
@@ -9146,16 +9251,21 @@ function jobDone(id){
       j.sig={img:o.toDataURL('image/jpeg',.7),name:el.querySelector('#jd_name').value.trim(),ts:Date.now()};
     }
     j.status='erledigt';j.erledigtAm=today();
-    const dop=!lb&&j.fahrt!==false&&!j.fahrtId&&j.customerId&&db.fahrten.some(f=>f.customerId===j.customerId&&f.date===j.date&&!isDepFahrt(f));
+    if(kr){const r=ui.kmRun;r.jobs=[...new Set([...(r.jobs||[]),r.jobId,j.id].filter(Boolean))];uiSave();}
+    const dop=kr||!lb&&j.fahrt!==false&&!j.fahrtId&&j.customerId&&db.fahrten.some(f=>f.customerId===j.customerId&&f.date===j.date&&!isDepFahrt(f));
     const n=dop?0:jobFahrtenSchreiben(j);
     save();closeSheets();render();
     celebrate('Auftrag erledigt');
     setTimeout(()=>{
-      if(lb&&j.fahrt!==false&&!j.lbId){
+      const r=ui.lbRun;
+      if(lb&&j.fahrt!==false&&!j.lbId&&r&&(!r.jobId||r.jobId===j.id)){
+        lbEdit(null,Object.assign(lbRunPreset(r,false),{art:'betrieb',customerId:hat?c.id:(r.customerId||''),partner:hat?custName(c):(r.partner||''),ziel:r.ziel||jobAdresse(j)||'',zweck:r.zweck||j.titel||'Gartenpflege',jobId:j.id}));
+        toast('Kilometerstand bei Ankunft eintragen');
+      }else if(lb&&j.fahrt!==false&&!j.lbId){
         lbEdit(null,{date:j.date,art:'betrieb',customerId:hat?c.id:'',partner:hat?custName(c):'',ziel:jobAdresse(j)||'',zweck:j.titel||'Gartenpflege',jobId:j.id,_vorschlag:lbStand(fzAkt().id)+(km||0)});
         toast('Kilometerstand eintragen');
       }else{
-        toast(n?`Erledigt · ${n===1?'Fahrt':n+' Fahrten'} eingetragen`:'Erledigt');
+        toast(kr?'Erledigt · km folgen beim Zurückkommen':n?`Erledigt · ${n===1?'Fahrt':n+' Fahrten'} eingetragen`:'Erledigt');
         bewertungFrage(j);
       }
     },900);
@@ -9175,7 +9285,7 @@ function bewertungFrage(j){
 function jobZuRechnung(id){
   const j=db.jobs.find(x=>x.id===id);if(!j)return;
   presetCust=j.customerId;try{editDoc('invoice');}finally{presetCust=null;}
-  if(!cur||(cur.positions||[]).length)return;
+  if(!cur||(cur.positions||[]).some(p=>!p._auto))return;
   cur.deliveryDate=j.date;cur.jobId=j.id;
   if(+j.preis>0)cur.positions.push({desc:j.titel||'Gartenarbeiten',qty:1,unit:'pauschal',price:+j.preis,comment:dDE(j.date)});
   else if(+j.ist>0)cur.positions.push({desc:j.titel||'Gartenarbeiten',qty:+j.ist,unit:'Std',price:+db.settings.defaults.hourRate||0,comment:dDE(j.date)});
@@ -9598,7 +9708,7 @@ jobDone=function(id){
    SCHNELL-ANGEBOT AUS DEN GARTENMASSEN
    Rasenfläche und Heckenlänge aus dem Gartenprofil × deine Preise.
    ===================================================================== */
-const PREIS_DEF={maehen:0.12,maehenMin:35,vertik:0.45,dueng:0.15,hecke:5,heckeEnts:1.2,laub:0.06,anfahrt:15};
+const PREIS_DEF={maehen:0.12,maehenMin:35,vertik:0.45,dueng:0.15,hecke:5,heckeEnts:1.2,laub:0.06,anfahrt:55};
 const preise=()=>Object.assign({},PREIS_DEF,db.settings.preise5||{});
 const HOEHE={1:['bis 1,5 m',1],1.4:['1,5 bis 2,5 m',1.4],1.9:['über 2,5 m (mit Gerüst/Leiter)',1.9]};
 function schnellAngebot(cid){
@@ -9615,7 +9725,7 @@ function schnellAngebot(cid){
     if(st.sel.laub&&m2)L.push({k:'laub',desc:'Laub von Rasen und Beeten entfernen',qty:m2,unit:'m²',price:P.laub});
     if(st.sel.hecke&&lf)L.push({k:'hecke',desc:`Heckenschnitt beidseitig und oben, Höhe ${HOEHE[st.hf][0]}`,qty:lf,unit:'lfm',price:+(P.hecke*st.hf).toFixed(2)});
     if(st.sel.heckeEnts&&lf)L.push({k:'heckeEnts',desc:'Schnittgut aufladen und fachgerecht entsorgen',qty:lf,unit:'lfm',price:P.heckeEnts});
-    if(st.sel.anfahrt&&L.length)L.push({k:'anfahrt',desc:'An- und Abfahrt',qty:1,unit:'Pauschal',price:P.anfahrt});
+    if(st.sel.anfahrt&&L.length)L.push({k:'anfahrt',desc:ANFAHRT_TXT,qty:1,unit:'Pauschal',price:P.anfahrt});
     return L;};
   const draw=()=>{
     const L=zeilen(),tot=sum(L,x=>x.qty*x.price);
@@ -9832,6 +9942,614 @@ v5Init=function(){
   try{const nk=db.settings.numbers;if(!nk.invSetTs){nkWahl('jahr',true);setTimeout(()=>toast('Rechnungsnummern ab jetzt mit Jahr: '+nk.invPrefix+nk.invNext),1500);}else invSkip();}catch(e){console.warn(e);}
   return _v5InitNk.apply(this,arguments);
 };
+
+/* =====================================================================
+   VERSION 5.1 – Rechtssicherheit
+   1. Festgeschriebene Rechnungen: kein Bearbeiten, kein Zurück zum Entwurf,
+      Korrektur nur per Storno + neue Rechnung. Beim Festschreiben wird das
+      PDF einmal erzeugt und unverändert archiviert (IndexedDB buero_pdf,
+      SHA-256 in d.arch). Erneutes Senden nutzt dieses PDF.
+      Empfängeranschrift wird beim Festschreiben eingefroren (d.empf).
+      Kunden mit Belegen werden archiviert statt gelöscht.
+   2. Sicherung außer Haus: ZIP mit Daten, Rechnungs-PDFs und Belegfotos,
+      Ampel auf der Startseite (grün ≤ 7 Tage, gelb ≤ 14, sonst rot).
+   3. Rechnungs-Check vor dem Festschreiben (Pflichtangaben, Datum,
+      Kleinunternehmergrenze), Texte auf Stand 2025.
+   4. Datenschutz: Hinweis für Kunden, Verarbeitungsverzeichnis,
+      Kartendienst-Schalter, Löschvorschlag nach Fristablauf.
+   5. Wochenabschluss.
+   ===================================================================== */
+const KU_HINWEIS='Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Steuerbefreiung für Kleinunternehmer).';
+const VERZUG_HINWEIS='Hinweis nach § 286 Abs. 3 BGB: Sie kommen ohne weitere Mahnung in Verzug, wenn Sie nicht innerhalb von 30 Tagen nach Fälligkeit und Zugang dieser Rechnung zahlen.';
+function verzugHinweisFuer(d){
+  if(db.settings.verzugHinweis===false)return false;
+  try{return isPrivat(cust(d.customerId));}catch(e){return false;}
+}
+const AUFBEWAHR_JAHRE=8;
+
+/* ---------- 1a. PDF-Archiv ---------- */
+const PDF_DB='buero_pdf',PDF_STORE='pdf';
+let _pdfDBP=null,_archKeys=null,_archBusy=false,_archBypass=false;
+function pdfOpen(){
+  if(_pdfDBP)return _pdfDBP;
+  _pdfDBP=new Promise((res,rej)=>{try{
+    const r=indexedDB.open(PDF_DB,1);
+    r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(PDF_STORE))r.result.createObjectStore(PDF_STORE);};
+    r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
+  }catch(e){rej(e);}});
+  return _pdfDBP;
+}
+async function pdfPut(id,rec){
+  const idb=await pdfOpen();
+  return new Promise((res,rej)=>{const tx=idb.transaction(PDF_STORE,'readwrite');tx.objectStore(PDF_STORE).put(rec,id);
+    tx.oncomplete=()=>{(_archKeys||new Set()).add(id);res(true);};tx.onerror=()=>rej(tx.error);});
+}
+async function pdfGet(id){
+  try{const idb=await pdfOpen();return await new Promise((res,rej)=>{
+    const rq=idb.transaction(PDF_STORE,'readonly').objectStore(PDF_STORE).get(id);
+    rq.onsuccess=()=>res(rq.result||null);rq.onerror=()=>rej(rq.error);});}
+  catch(e){return null;}
+}
+async function pdfDel(id){try{const idb=await pdfOpen();idb.transaction(PDF_STORE,'readwrite').objectStore(PDF_STORE).delete(id);if(_archKeys)_archKeys.delete(id);}catch(e){}}
+async function archKeys(){
+  if(_archKeys)return _archKeys;
+  try{const idb=await pdfOpen();
+    _archKeys=new Set(await new Promise((res,rej)=>{const rq=idb.transaction(PDF_STORE,'readonly').objectStore(PDF_STORE).getAllKeys();
+      rq.onsuccess=()=>res(rq.result||[]);rq.onerror=()=>rej(rq.error);}));}
+  catch(e){_archKeys=new Set();}
+  return _archKeys;
+}
+async function sha256hex(buf){
+  try{const h=await crypto.subtle.digest('SHA-256',buf);return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('');}
+  catch(e){return '';}
+}
+/* Erzeugt das Archiv-PDF. force = neu erzeugen (nur bei Umnummerierung vor Versand). */
+async function archivInvoice(d,force){
+  if(!d||d.draft||!window.jspdf)return false;
+  if(!force&&(await archKeys()).has(d.id))return true;
+  if(!d.empf)d.empf=addrLines(cust(d.customerId));
+  let doc;_archBypass=true;
+  try{doc=await genPdf('invoice',d.id,'Rechnung');}catch(e){console.warn('Archiv-PDF',e);doc=null;}
+  finally{_archBypass=false;}
+  if(!doc)return false;
+  const buf=doc.output('arraybuffer'),hash=await sha256hex(buf);
+  /* Herkunft: beim Festschreiben, nachträglich (Altbestand vor 5.1) oder
+     wiederhergestellt (Datensatz kennt ein Archiv, das auf diesem Gerät fehlt) */
+  const art=force?'neu nummeriert':d.arch?'wiederhergestellt':(d.altbestand?'nachträglich':'beim Festschreiben');
+  try{await pdfPut(d.id,{buf,hash,ts:Date.now(),nr:d.number,art});}catch(e){console.warn(e);return false;}
+  if(!d.arch||force)d.arch={ts:Date.now(),hash,size:buf.byteLength,nr:d.number,art};
+  return true;
+}
+async function archivLauf(){
+  if(_archBusy||!window.jspdf)return;
+  _archBusy=true;let n=0;
+  try{
+    const K=await archKeys();
+    for(const d of db.invoices.filter(i=>!i.draft&&!K.has(i.id))){
+      if(await archivInvoice(d))n++;
+      await new Promise(r=>setTimeout(r,40));
+    }
+  }finally{_archBusy=false;}
+  if(n){await saveQuiet();try{syncSchedule();}catch(e){}}
+}
+const pdfFake=buf=>({
+  save:name=>dlBlob(new Blob([buf],{type:'application/pdf'}),name),
+  output:t=>t==='arraybuffer'?buf:new Blob([buf],{type:'application/pdf'})
+});
+const _genPdf51=genPdf;
+genPdf=async function(type,id,kind){
+  if(!_archBypass&&type==='invoice'&&(!kind||kind==='Rechnung')){
+    const d=db.invoices.find(x=>x.id===id);
+    if(d&&!d.draft){
+      let r=await pdfGet(id);
+      if(!r&&await archivInvoice(d)){r=await pdfGet(id);saveQuiet();}
+      if(r&&r.buf)return pdfFake(r.buf);
+    }
+  }
+  return _genPdf51(type,id,kind);
+};
+
+/* ---------- 1b. Festschreiben heißt festschreiben ---------- */
+const _editDoc51=editDoc;
+editDoc=function(type,id){
+  if(type==='invoice'&&id){
+    const d=db.invoices.find(x=>x.id===id);
+    if(d&&!d.draft){toast('Festgeschrieben: ändern nur über „Korrigieren“');closeSheets();viewDoc('invoice',id);return;}
+  }
+  return _editDoc51(type,id);
+};
+const _saveDoc51=saveDoc;
+saveDoc=function(draft){
+  if(curType==='invoice'&&cur){
+    const ex=db.invoices.find(x=>x.id===cur.id);
+    if(ex&&!ex.draft){toast('Diese Rechnung ist festgeschrieben und bleibt unverändert');closeSheets();return;}
+    if(!draft&&!cur._checked){reCheck();return;}
+    delete cur._checked;
+    if(!draft){cur.empf=addrLines(cust(cur.customerId));cur.finTs=Date.now();}
+  }
+  return _saveDoc51(draft);
+};
+function korrigieren(id){
+  const d=db.invoices.find(x=>x.id===id);if(!d)return;
+  if(d.storniertDurch){toast('Ist bereits storniert');return;}
+  if(d.stornoVon){toast('Eine Storno-Rechnung wird nicht korrigiert');return;}
+  alert(`So korrigierst du ${d.number}:\n\n1. Die App erstellt eine Storno-Rechnung über den vollen Betrag.\n2. Danach öffnet sie eine Kopie als neuen Entwurf mit neuer Nummer.\n\nSchick dem Kunden beides: Storno und neue Rechnung.`);
+  dupStorno(id);
+}
+/* Umnummerieren vor dem Versand: Archiv-PDF passend neu erzeugen */
+['dupNeu','nkNeu'].forEach(fn=>{
+  const orig=window[fn];if(typeof orig!=='function')return;
+  window[fn]=function(id){
+    const d=db.invoices.find(x=>x.id===id),alt=d&&d.number;
+    const r=orig.apply(this,arguments);
+    if(d&&d.number!==alt){d.empf=d.empf||addrLines(cust(d.customerId));archivInvoice(d,true).then(()=>saveQuiet());}
+    return r;
+  };
+});
+/* Kunden mit Belegen archivieren statt löschen */
+const kundeHatBelege=id=>db.invoices.some(i=>i.customerId===id&&!i.draft)||db.offers.some(o=>o.customerId===id);
+const _delCustomer51=delCustomer;
+delCustomer=function(id){
+  if(!kundeHatBelege(id))return _delCustomer51(id);
+  const c=cust(id);
+  if(!confirm(`${custName(c)} hat Rechnungen oder Angebote. Die müssen ${AUFBEWAHR_JAHRE} Jahre aufbewahrt werden, deshalb wird der Kunde nicht gelöscht.\n\nStattdessen archivieren? Er verschwindet aus Listen, Auswahl und Rundschreiben, seine Belege bleiben vollständig.`))return;
+  c.archiviert=today();save();closeSheets();render();toast('Kunde archiviert');
+};
+function kundeZurueck(id){const c=db.customers.find(x=>x.id===id);if(!c)return;delete c.archiviert;save();render();toast('Kunde wieder aktiv');dsDraw();}
+
+/* Archiv-Hinweis in der Rechnungsansicht */
+const _viewDoc51=viewDoc;
+viewDoc=function(type,id){
+  const r=_viewDoc51(type,id);
+  try{
+    const d=type==='invoice'&&db.invoices.find(x=>x.id===id);
+    if(d&&!d.draft){
+      const sh=[...document.querySelectorAll('.sheet')].pop(),b=sh&&sh.querySelector('.body');
+      if(b){
+        const div=document.createElement('div');div.className='card';div.style.cssText='--stripe:var(--moss)';
+        const a=d.arch;
+        div.innerHTML=`<div class="lbl">Archiv</div><div class="hint" style="margin-top:4px">${a
+          ?`PDF ${esc(a.art||'archiviert')} am ${new Date(a.ts).toLocaleString('de-DE')} · Prüfsumme ${esc(String(a.hash||'').slice(0,16))}…<br>Erneutes Senden verschickt genau dieses PDF.`
+          :'Archiv-PDF wird gerade erzeugt …'}</div>`;
+        b.insertBefore(div,b.children[1]||null);
+      }
+    }
+  }catch(e){console.warn(e);}
+  return r;
+};
+
+/* ---------- 3. Rechnungs-Check vor dem Festschreiben ---------- */
+function kuUmsatz(y,ohneId){
+  return sum(db.invoices.filter(i=>!i.draft&&i.id!==ohneId&&String(i.date||'').slice(0,4)===String(y)),i=>totals(i).net);
+}
+function reCheckList(d){
+  const c=cust(d.customerId),co=db.settings.company,E=[],W=[],t=today();
+  if(!c.id)E.push('Kein Kunde gewählt.');
+  else{
+    if(!((c.company||'').trim()||`${c.first||''}${c.last||''}`.trim()))E.push('Name des Kunden fehlt (Vor- und Nachname oder Firma). Ohne ihn steht kein Empfänger auf der Rechnung.');
+    if(!(c.street||'').trim()||!(c.zip||'').trim()||!(c.city||'').trim())E.push('Anschrift des Kunden unvollständig: Straße, PLZ und Ort sind Pflicht.');
+  }
+  if(!(co.name||'').trim()||!(co.street||'').trim()||!(co.zip||'').trim()||!(co.city||'').trim())E.push('Deine eigene Anschrift ist unvollständig (Mehr › Firmendaten).');
+  if(!(co.taxNumber||'').trim()&&!(co.vatId||'').trim())E.push('Steuernummer fehlt (Mehr › Firmendaten).');
+  if(!(d.positions||[]).length)E.push('Keine Position.');
+  (d.positions||[]).forEach((p,i)=>{
+    if(!(p.desc||'').trim())E.push(`Position ${i+1}: Beschreibung fehlt.`);
+    if(!(+p.qty))W.push(`Position ${i+1}: Menge ist 0.`);
+  });
+  if(!d.date)E.push('Rechnungsdatum fehlt.');
+  if(!d.deliveryDate)E.push('Leistungsdatum fehlt.');
+  if(d.date&&d.date>t)W.push('Rechnungsdatum liegt in der Zukunft.');
+  if(d.date&&d.date<addDays(t,-30))W.push('Rechnungsdatum liegt über 30 Tage zurück. Normal ist das heutige Datum.');
+  const last=db.invoices.filter(i=>!i.draft&&i.id!==d.id).sort((a,b)=>a.date<b.date?1:-1)[0];
+  if(last&&d.date&&d.date<last.date)W.push(`Rechnungsdatum liegt vor deiner letzten Rechnung ${last.number} vom ${dDE(last.date)}. Nummern und Daten sollten zusammen aufsteigen.`);
+  if(d.deliveryDate&&d.date&&d.deliveryDate>d.date)W.push('Leistungsdatum liegt nach dem Rechnungsdatum.');
+  if(d.deliveryDate===t&&d.date===t&&!d.jobId&&(d.deliveryMode||'tag')==='tag')W.push('Leistungsdatum ist heute. Stimmt das? Sonst den Tag der Arbeit eintragen.');
+  const g=totals(d);
+  if(!(g.gross>0)&&!d.stornoVon)W.push('Rechnungsbetrag ist 0 € oder negativ.');
+  if(d.klein){
+    const y=+String(d.date||t).slice(0,4),vj=kuUmsatz(y-1),lj=kuUmsatz(y,d.id);
+    if(lj+g.net>100000)E.push(`Mit dieser Rechnung liegt dein Umsatz ${y} bei ${eur(lj+g.net)}, also über 100.000 €. Ab hier gilt die Kleinunternehmerregelung nicht mehr: Umsatzsteuer ausweisen und sofort mit dem Steuerberater sprechen.`);
+    else if(vj>25000)W.push(`Dein Umsatz ${y-1} lag bei ${eur(vj)}, also über 25.000 €. Dann gilt die Kleinunternehmerregelung ${y} nicht mehr. Bitte mit dem Steuerberater klären.`);
+  }
+  return {E,W};
+}
+function reCheck(){
+  const d=cur;normDelivery(d);
+  const {E,W}=reCheckList(d),c=cust(d.customerId),nk=db.settings.numbers;
+  const wasDraft=!db.invoices.some(x=>x.id===d.id&&!x.draft);
+  const el=sheet('Rechnung prüfen',`
+    <div class="card" style="--stripe:${E.length?'var(--red)':W.length?'var(--clay)':'var(--moss)'}">
+      <div class="lbl">${E.length?'Bitte erst ergänzen':W.length?'Bitte kurz prüfen':'Pflichtangaben vollständig'}</div>
+      ${E.map(x=>`<div class="hint" style="margin-top:8px;color:var(--red)"><b>✕</b> ${esc(x)}</div>`).join('')}
+      ${W.map(x=>`<div class="hint" style="margin-top:8px;color:var(--clay)"><b>!</b> ${esc(x)}</div>`).join('')}
+    </div>
+    <div class="card">
+      <div class="kv"><span>Kunde</span><b style="text-align:right">${esc((d.empf||addrLines(c)).join(', ')||'—')}</b></div>
+      <div class="kv"><span>Rechnungsnummer</span><b class="mono">${esc(wasDraft?nk.invPrefix+nk.invNext:d.number)}</b></div>
+      <div class="kv"><span>Rechnungsdatum</span><b>${dDE(d.date)}</b></div>
+      <div class="kv"><span>${esc(leistungsLabel(d))}</span><b style="text-align:right">${esc(leistungsShort(d))}</b></div>
+      <div class="kv"><span>Betrag</span><b class="mono">${eur(totals(d).gross)}</b></div>
+    </div>
+    <div class="info">Nach dem Festschreiben lässt sich die Rechnung nicht mehr ändern oder löschen. Fehler korrigierst du dann nur noch mit Storno und neuer Rechnung. So verlangen es die GoBD.</div>
+    ${E.length?'':`<button class="btn pri full" id="rc_ok">Festschreiben</button>`}
+    <button class="btn full" style="margin-top:8px" id="rc_back">Zurück zur Rechnung</button>`);
+  el.dataset.nodirty='1';
+  el.querySelector('#rc_back').onclick=()=>closeSheet(el);
+  const ok=el.querySelector('#rc_ok');
+  if(ok)ok.onclick=()=>{el.remove();cur._checked=true;saveDoc(false);};
+}
+
+/* ---------- 2. Sicherung außer Haus ---------- */
+function extSicherung(){
+  const s=db.settings,a=s.tax.lastBackup?Date.parse(String(s.tax.lastBackup).slice(0,10)+'T12:00'):0;
+  const b=s.extBackupTs||0,c=syncReady()&&s.sync.lastSync?Date.parse(s.sync.lastSync):0;
+  const ts=Math.max(a,b,c);
+  const tage=ts?Math.floor((Date.now()-ts)/864e5):999;
+  return {ts,tage,ampel:tage<=7?'gruen':tage<=14?'gelb':'rot',wie:c&&c>=Math.max(a,b)?'Cloud-Sync':'Sicherungsdatei'};
+}
+/* Alte Erinnerung (30 Tage) durch 7-Tage-Regel ersetzen */
+backupHinweis=function(){const x=extSicherung();return {faellig:x.tage>7,tage:x.tage};};
+const ZIP_NAME=()=>`Sicherung_${(db.settings.company.name||'Buero').replace(/[^\wäöüÄÖÜß]+/g,'_')}_${today()}.zip`;
+async function vollSicherung(){
+  toast('Sicherung wird gebaut …');
+  try{
+    await ensureMediaPersisted();
+    await archivLauf();
+    const files=[];
+    const daten=structuredClone(db);
+    if(daten.settings.sync)daten.settings.sync={...daten.settings.sync,token:''};
+    if(daten.settings.ai)daten.settings.ai={...daten.settings.ai,key:''};
+    files.push({name:'daten.json',data:ENC.encode(JSON.stringify({v:3,app:'gartenflo-buero',erstellt:nowIso(),version:APP_VERSION5,data:daten}))});
+    for(const d of db.invoices.filter(i=>!i.draft)){
+      const r=await pdfGet(d.id);
+      if(r&&r.buf)files.push({name:`Rechnungen/${String(d.date||'').slice(0,4)}/${String(d.number).replace(/[^\w\-]+/g,'_')}__${d.id}.pdf`,data:new Uint8Array(r.buf)});
+    }
+    const fotos=async(p,pfad)=>{if(p&&typeof p==='object'&&p.mid){const f=await mediaGet(p.mid);if(f)try{files.push({name:`${pfad}__${p.mid}.jpg`,data:dataUrlToU8(f)});}catch(e){}}};
+    for(const e of db.expenses){
+      const L=(e.receipts&&e.receipts.length)?e.receipts:(e.receipt?[e.receipt]:[]);
+      for(const p of L)await fotos(p,`Belege/${e.date||'ohne-datum'}_${(e.vendor||e.desc||'Beleg').replace(/[^\w\-]+/g,'_').slice(0,30)}`);
+    }
+    for(const j of db.jobs)for(const f of (j.fotos||[]))await fotos(f.data,`Auftragsfotos/${j.date||'ohne-datum'}`);
+    files.push({name:'LIESMICH.txt',data:ENC.encode(`Vollständige Sicherung von Garten Flo · Büro ${APP_VERSION5}, erstellt ${new Date().toLocaleString('de-DE')}.\n\ndaten.json: alle Daten (ohne Zugangsschlüssel)\nRechnungen/: archivierte Rechnungs-PDFs, so wie sie verschickt wurden\nBelege/: Fotos der Eingangsbelege\nAuftragsfotos/: Fotos aus Aufträgen\n\nWiederherstellen: in der App Mehr › Sicherung laden › diese ZIP-Datei wählen.\nAufbewahren: Rechnungen und Belege ${AUFBEWAHR_JAHRE} Jahre ab Ende des Kalenderjahres.`)});
+    const blob=zipStore(files);
+    const zip=new Blob([blob],{type:'application/zip'});
+    await shareOrDownload(zip,ZIP_NAME(),'application/zip');
+    db.settings.extBackupTs=Date.now();db.settings.tax.lastBackup=today();await saveQuiet();
+    render();
+    toast(`Sicherung fertig: ${files.length} Dateien. In „Dateien“ › iCloud Drive ablegen.`);
+  }catch(e){console.warn(e);toast('Sicherung fehlgeschlagen: '+(e&&e.message||e));}
+}
+/* ZIP (ohne Kompression, wie zipStore schreibt) lesen */
+function zipLesen(u8){
+  const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength),out={};let p=0;
+  while(p+30<=u8.length&&dv.getUint32(p,true)===0x04034b50){
+    const comp=dv.getUint16(p+8,true),size=dv.getUint32(p+18,true),nl=dv.getUint16(p+26,true),xl=dv.getUint16(p+28,true);
+    const name=new TextDecoder().decode(u8.subarray(p+30,p+30+nl)),start=p+30+nl+xl;
+    if(comp!==0)throw new Error('ZIP ist komprimiert – bitte die Original-Sicherungsdatei verwenden');
+    out[name]=u8.subarray(start,start+size);p=start+size;
+  }
+  return out;
+}
+function vollLaden(){
+  const i=document.createElement('input');i.type='file';i.accept='.zip,application/zip,.json,application/json';
+  i.onchange=async()=>{
+    const f=i.files[0];if(!f)return;
+    if(/\.json$/i.test(f.name))return importAusJSONDatei(f);
+    try{
+      const Z=zipLesen(new Uint8Array(await f.arrayBuffer()));
+      if(!Z['daten.json'])throw new Error('daten.json fehlt in der ZIP-Datei');
+      const j=JSON.parse(new TextDecoder().decode(Z['daten.json']));
+      const d=j.data||j;if(!d.settings)throw new Error('Keine Büro-Daten');
+      const n=Object.keys(Z).filter(k=>/\.(pdf|jpg)$/i.test(k)).length;
+      if(!confirm(`Sicherung vom ${j.erstellt?new Date(j.erstellt).toLocaleString('de-DE'):'?'} einspielen?\n\n${(d.invoices||[]).length} Rechnungen, ${(d.customers||[]).length} Kunden, ${n} PDFs und Fotos.\n\nDie Daten auf diesem Gerät werden ersetzt. Vorher legt die App eine Sicherung auf dem Gerät an.`))return;
+      try{if(typeof snapTake==='function')await snapTake(true);}catch(e){}
+      const sync=db.settings.sync,key=db.settings.ai?db.settings.ai.key:'';
+      db=migrate(d);db.settings.sync=sync;db.settings.ai=db.settings.ai||{};db.settings.ai.key=key;
+      for(const [name,data] of Object.entries(Z)){
+        let m=name.match(/__([\w\-]+)\.pdf$/);
+        if(m){const inv=db.invoices.find(x=>x.id===m[1]);const buf=data.slice().buffer;
+          await pdfPut(m[1],{buf,hash:await sha256hex(buf),ts:inv&&inv.arch?inv.arch.ts:Date.now(),nr:inv?inv.number:'',art:inv&&inv.arch?inv.arch.art:'aus Sicherung'});continue;}
+        m=name.match(/__([\w\-]+)\.jpg$/);
+        if(m){let b='';const CH=0x8000;for(let k=0;k<data.length;k+=CH)b+=String.fromCharCode.apply(null,data.subarray(k,k+CH));
+          await mediaPut(m[1],'data:image/jpeg;base64,'+btoa(b));}
+      }
+      _snap=null;trackChanges();await save();render();toast('Sicherung geladen');
+    }catch(e){alert('Sicherung konnte nicht geladen werden: '+(e&&e.message||e));}
+  };
+  i.click();
+}
+function importAusJSONDatei(f){
+  const r=new FileReader();
+  r.onload=async()=>{try{const d=JSON.parse(r.result);if(!d.settings&&!(d.data&&d.data.settings))throw 0;
+    if(confirm('Backup einspielen? Aktuelle Daten werden ersetzt.')){
+      const sync=db.settings.sync,key=db.settings.ai?db.settings.ai.key:'';
+      db=migrate(d.data&&d.data.settings?d.data:d);
+      db.settings.sync=sync;db.settings.ai=db.settings.ai||{};db.settings.ai.key=key;
+      if(d.tomb)db.tomb=d.tomb;
+      _snap=null;trackChanges();await save();render();toast('Backup geladen');}}
+    catch(e){toast('Datei konnte nicht gelesen werden');}};
+  r.readAsText(f);
+}
+function ampelCard(){
+  const x=extSicherung();
+  if(x.ampel==='gruen')return '';
+  const farbe=x.ampel==='gelb'?'var(--clay)':'var(--red)';
+  return `<div class="card" style="--stripe:${farbe}">
+    <div class="row between"><span class="lbl">Sicherung außer Haus</span><span class="hint" style="color:${farbe};font-weight:700">${x.tage>900?'noch nie':'vor '+x.tage+' Tagen'}</span></div>
+    <div class="hint" style="margin-top:4px">Deine Buchhaltung liegt nur auf diesem iPhone. Geht es verloren, sind Rechnungen und Belege weg, die du ${AUFBEWAHR_JAHRE} Jahre aufbewahren musst.</div>
+    <button class="btn pri full" style="margin-top:10px" onclick="${syncReady()?'syncNow()':'vollSicherung()'}">${syncReady()?'Jetzt synchronisieren':'Jetzt sichern'}</button>
+    ${syncReady()?`<button class="btn sm full" style="margin-top:6px" onclick="vollSicherung()">Zusätzlich ZIP mit PDFs und Fotos</button>`:''}</div>`;
+}
+
+/* ---------- 4. Datenschutz ---------- */
+function geoErlaubt(){return db.settings.geoErlaubt!==false;}
+const _geocode51=geocode;
+geocode=async function(o){if(!geoErlaubt())throw new Error('Kartendienste sind in Mehr › Datenschutz ausgeschaltet');return _geocode51(o);};
+function dsLink(){
+  if(db.settings.dsLink!==undefined)return db.settings.dsLink;
+  try{return location.protocol==='https:'?new URL('datenschutz.html',location.href).href:'';}catch(e){return '';}
+}
+function dsText(){
+  const co=db.settings.company;
+  return `Datenschutzinformation für Kundinnen und Kunden (Art. 13 DSGVO)
+
+Verantwortlich
+${co.owner}, ${co.name}, ${co.street}, ${co.zip} ${co.city}
+Telefon ${co.phone} · E-Mail ${co.email}
+
+Welche Daten ich verarbeite
+Name, Anschrift, Telefonnummer und E-Mail-Adresse, die Anschrift des Grundstücks, Angaben zu den beauftragten Arbeiten, Termine, Angebote, Rechnungen und Zahlungseingänge, Fotos des Gartens vor und nach der Arbeit sowie gegebenenfalls Ihre Unterschrift bei der Abnahme.
+
+Wozu und auf welcher Grundlage
+• Um Ihren Auftrag zu planen, auszuführen und abzurechnen (Art. 6 Abs. 1 lit. b DSGVO).
+• Um gesetzliche Aufbewahrungspflichten zu erfüllen (Art. 6 Abs. 1 lit. c DSGVO i. V. m. § 147 AO und § 14b UStG).
+• Um Fahrten zu planen und Entfernungen zu berechnen und um Sie als Bestandskunde an wiederkehrende Gartenarbeiten zu erinnern (berechtigtes Interesse, Art. 6 Abs. 1 lit. f DSGVO). Diesen Erinnerungen können Sie jederzeit formlos widersprechen, ohne dass dafür andere Kosten als die Übermittlungskosten nach den Basistarifen entstehen.
+
+Wer die Daten erhält
+• Mein Steuerberater und das Finanzamt, soweit gesetzlich nötig.
+• Meine Bank für Zahlungen.
+• OpenStreetMap-Dienste (Nominatim, OSRM) erhalten nur die Anschrift, ohne Namen, um die Entfernung zu berechnen.
+• Für Datensicherungen nutze ich Cloud-Speicher (Apple iCloud, gegebenenfalls GitHub). Diese Anbieter sitzen in den USA und sind nach dem EU-US Data Privacy Framework zertifiziert.
+Ihre Daten werden nicht verkauft und nicht für Werbung Dritter genutzt.
+
+Wie lange
+Rechnungen und Buchungsbelege bewahre ich ${AUFBEWAHR_JAHRE} Jahre auf, gerechnet ab Ende des Kalenderjahres. Kontaktdaten lösche ich, wenn die Geschäftsbeziehung endet und keine Aufbewahrungspflicht mehr besteht.
+
+Ihre Rechte
+Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch. Schreiben Sie dazu einfach an ${co.email}. Beschweren können Sie sich beim Bayerischen Landesamt für Datenschutzaufsicht, Promenade 18, 91522 Ansbach.
+
+Stand: ${new Date().toLocaleDateString('de-DE',{month:'long',year:'numeric'})}`;
+}
+async function dsTextPdf(){
+  if(!window.jspdf){toast('PDF-Modul nicht geladen');return;}
+  const {jsPDF}=window.jspdf,doc=new jsPDF({unit:'mm',format:'a4'});
+  doc.setFont('helvetica','normal');doc.setFontSize(10);let y=20;
+  dsText().split('\n').forEach((ln,i)=>{
+    const head=i===0||(/^[A-ZÄÖÜW][^.:•]{3,40}$/.test(ln)&&!ln.includes(','));
+    doc.setFont('helvetica',head?'bold':'normal');doc.setFontSize(i===0?13:10);
+    doc.splitTextToSize(ln||' ',170).forEach(l=>{if(y>280){doc.addPage();y=20;}doc.text(l,20,y);y+=i===0?7:4.8;});
+  });
+  await shareOrDownload(doc.output('blob'),'Datenschutzinformation.pdf','application/pdf');
+}
+async function vvtPdf(){
+  if(!window.jspdf){toast('PDF-Modul nicht geladen');return;}
+  const {jsPDF}=window.jspdf,doc=new jsPDF({unit:'mm',format:'a4',orientation:'landscape'}),co=db.settings.company;
+  doc.setFont('helvetica','bold');doc.setFontSize(14);doc.text('Verzeichnis von Verarbeitungstätigkeiten (Art. 30 DSGVO)',15,16);
+  doc.setFont('helvetica','normal');doc.setFontSize(9);
+  doc.text(`Verantwortlich: ${co.owner}, ${co.name}, ${co.street}, ${co.zip} ${co.city}, ${co.email} · Stand ${new Date().toLocaleDateString('de-DE')}`,15,23);
+  const R=[
+    ['Kunden, Angebote, Rechnungen','Auftragsabwicklung, Abrechnung','Kunden','Name, Anschrift, Kontakt, Grundstück, Leistungen, Beträge','Steuerberater, Finanzamt, Bank','8 Jahre ab Jahresende (Belege), Kontakt bis Ende der Geschäftsbeziehung'],
+    ['Zahlungseingänge, Kontoauszug-Abgleich','Buchhaltung','Kunden','Name, Betrag, Datum, Verwendungszweck','Steuerberater, Finanzamt','8 Jahre'],
+    ['Auftragsfotos, Unterschrift','Nachweis der Leistung','Kunden','Fotos des Gartens, Unterschrift, Name','keine','bis Ende der Gewährleistung bzw. 8 Jahre bei Rechnungsbezug'],
+    ['Routen und Entfernungen','Planung, Fahrtkosten','Kunden','Anschrift (ohne Namen)','OpenStreetMap Nominatim und OSRM (abschaltbar)','nicht gespeichert beim Dienst; km-Wert in der App'],
+    ['Fahrtenbuch','Nachweis betrieblicher Fahrten','Kunden (als Geschäftspartner)','Name, Ziel, Datum, km','Finanzamt','8 Jahre'],
+    ['Saison-Erinnerungen, Rundschreiben','Bestandskundenpflege (§ 7 Abs. 3 UWG)','Kunden','Name, E-Mail, Telefon','keine','bis Widerspruch'],
+    ['Belegerkennung (KI)','Erfassung von Eingangsbelegen','Lieferanten','Belegfoto, Händler, Betrag','Anthropic PBC, USA (DPF)','keine Speicherung zu Trainingszwecken'],
+    ['Datensicherung','Schutz vor Datenverlust','alle oben','alle oben','Apple iCloud bzw. GitHub (USA, DPF)','wie Ursprungsdaten']
+  ];
+  const H=['Tätigkeit','Zweck','Betroffene','Daten','Empfänger','Löschfrist'],X=[15,62,105,135,190,235],Wd=[45,41,28,53,43,50];
+  let y=32;doc.setFont('helvetica','bold');H.forEach((h,i)=>doc.text(h,X[i],y));y+=2;doc.line(15,y,285,y);y+=5;doc.setFont('helvetica','normal');
+  R.forEach(r=>{const L=r.map((v,i)=>doc.splitTextToSize(v,Wd[i]));const h=Math.max(...L.map(l=>l.length))*4+2;
+    if(y+h>195){doc.addPage();y=20;}L.forEach((l,i)=>doc.text(l,X[i],y));y+=h;doc.setDrawColor(210);doc.line(15,y-2.5,285,y-2.5);});
+  y+=4;doc.setFont('helvetica','bold');doc.text('Technische und organisatorische Maßnahmen',15,y);y+=5;doc.setFont('helvetica','normal');
+  doc.splitTextToSize('Daten liegen auf dem eigenen iPhone mit Code-Sperre und Geräteverschlüsselung. Sicherungen in iCloud bzw. in einem privaten GitHub-Repository mit Zugangsschlüssel. Rechnungen werden nach dem Festschreiben unveränderbar archiviert. Zugriff hat nur der Inhaber.',265).forEach(l=>{doc.text(l,15,y);y+=4.5;});
+  await shareOrDownload(doc.output('blob'),'Verarbeitungsverzeichnis.pdf','application/pdf');
+}
+/* Löschvorschlag: Frist abgelaufen (letzter Beleg vor > 8 Jahren ab Jahresende) oder nie Kunde geworden */
+function dsLoeschKandidaten(){
+  const y=new Date().getFullYear(),grenze=y-AUFBEWAHR_JAHRE-1,lim3=addDays(today(),-3*365);
+  return db.customers.map(c=>{
+    const docs=[...db.invoices.filter(i=>i.customerId===c.id),...db.offers.filter(o=>o.customerId===c.id)];
+    const lastDoc=docs.reduce((m,d)=>String(d.date||'')>m?String(d.date||''):m,'');
+    const lastJob=db.jobs.filter(j=>j.customerId===c.id).reduce((m,j)=>String(j.date||'')>m?String(j.date||''):m,'');
+    const letzt=[lastDoc,lastJob].sort().pop()||'';
+    if(docs.length&&+lastDoc.slice(0,4)<=grenze&&(!lastJob||lastJob<lim3))return {c,grund:`Letzter Beleg ${lastDoc.slice(0,4)}, Aufbewahrungsfrist abgelaufen`};
+    if(!docs.length&&(!letzt||letzt<lim3)&&(!c.created||c.created<Date.now()-3*365*864e5)&&!c.nextVisit)return {c,grund:'Kein Beleg, seit über 3 Jahren kein Kontakt'};
+    return null;
+  }).filter(Boolean);
+}
+function dsLoeschen(id){
+  const x=dsLoeschKandidaten().find(k=>k.c.id===id);if(!x)return;
+  if(!confirm(`${custName(x.c)} endgültig löschen?\n\n${x.grund}. Gelöscht werden Kunde, seine Angebote, Rechnungen (samt Archiv-PDF), Aufträge und Fotos. Das lässt sich nicht rückgängig machen.`))return;
+  const inv=db.invoices.filter(i=>i.customerId===id);inv.forEach(i=>pdfDel(i.id));
+  db.invoices=db.invoices.filter(i=>i.customerId!==id);db.offers=db.offers.filter(o=>o.customerId!==id);
+  db.jobs.filter(j=>j.customerId===id).forEach(j=>(j.fotos||[]).forEach(f=>photoCleanup(f.data)));
+  db.jobs=db.jobs.filter(j=>j.customerId!==id);
+  db.fahrten.forEach(f=>{if(f.customerId===id)f.customerId='';});
+  db.customers=db.customers.filter(c=>c.id!==id);
+  (db.settings.dsProtokoll=db.settings.dsProtokoll||[]).push({ts:Date.now(),text:`Kunde Nr. ${x.c.number||'?'} gelöscht (${x.grund})`});
+  save();render();dsDraw();toast('Gelöscht');
+}
+let _dsEl=null;
+function dsDraw(){if(_dsEl&&_dsEl.isConnected&&_dsEl.__redraw)_dsEl.__redraw();}
+function openDatenschutz(){
+  const el=sheet('Datenschutz','<div id="dsb"></div>');el.dataset.nodirty='1';_dsEl=el;
+  const draw=()=>{
+    const K=dsLoeschKandidaten(),A=db.customers.filter(c=>c.archiviert),link=dsLink();
+    el.querySelector('#dsb').innerHTML=`
+    <div class="card"><div class="lbl">Datenschutzinformation für Kunden</div>
+      <div class="hint" style="margin-top:4px">Pflicht nach Art. 13 DSGVO, sobald du Kundendaten erhebst. Am einfachsten als Link in jeder Angebots- und Rechnungs-Mail.</div>
+      <label class="f" style="margin-top:10px"><span>Link zur Datenschutzinformation</span><input id="ds_link" value="${esc(link)}" placeholder="https://…/datenschutz.html"></label>
+      <label class="row" style="gap:10px;margin-top:6px"><input type="checkbox" id="ds_mail" style="width:auto" ${db.settings.dsInMail!==false?'checked':''}> Link automatisch unter jede E-Mail setzen</label>
+      <div class="grid2" style="margin-top:10px"><button class="btn" onclick="dsTextPdf()">Als PDF</button><button class="btn" onclick="dsTextZeigen()">Text ansehen</button></div></div>
+    <div class="card"><div class="lbl">Verarbeitungsverzeichnis</div>
+      <div class="hint" style="margin-top:4px">Art. 30 DSGVO. Eine Seite, ausdrucken und zu den Steuerunterlagen legen.</div>
+      <button class="btn full" style="margin-top:10px" onclick="vvtPdf()">Als PDF erstellen</button></div>
+    <div class="card"><div class="lbl">Kartendienste</div>
+      <label class="row" style="gap:10px;margin-top:8px"><input type="checkbox" id="ds_geo" style="width:auto" ${geoErlaubt()?'checked':''}> Kundenadressen zur Entfernungsberechnung an OpenStreetMap senden</label>
+      <div class="hint" style="margin-top:6px">Es geht nur die Anschrift raus, kein Name. Ausgeschaltet trägst du die km selbst ein.</div></div>
+    <div class="card"><div class="lbl">Rechnungstext</div>
+      <label class="row" style="gap:10px;margin-top:8px"><input type="checkbox" id="ds_verz" style="width:auto" ${db.settings.verzugHinweis!==false?'checked':''}> Verzugshinweis (§ 286 Abs. 3 BGB) auf Rechnungen an Privatkunden</label>
+      <div class="hint" style="margin-top:6px">Ohne diesen Satz kommt ein Privatkunde erst mit deiner ersten Mahnung in Verzug.</div></div>
+    <button class="btn pri full" id="ds_save">Sichern</button>
+    <div class="mgrp">Löschvorschlag · ${K.length}</div>
+    ${K.length?`<div class="v5list">${K.map(k=>`<div class="it n2" style="cursor:default"><div style="min-width:0"><div class="nm">${esc(custName(k.c))}</div><div class="mt">${esc(k.grund)}</div></div><span class="r"><button class="btn sm dan" onclick="dsLoeschen('${k.c.id}')">Löschen</button></span></div>`).join('')}</div>`
+      :'<div class="card"><div class="hint">Niemand. Gelöscht werden darf erst, wenn die Aufbewahrungsfrist der Belege abgelaufen ist.</div></div>'}
+    ${A.length?`<div class="mgrp">Archivierte Kunden · ${A.length}</div><div class="v5list">${A.map(c=>`<div class="it n2" style="cursor:default"><div style="min-width:0"><div class="nm">${esc(custName(c))}</div><div class="mt">archiviert am ${dDE(c.archiviert)}</div></div><span class="r"><button class="btn sm" onclick="kundeZurueck('${c.id}')">Wieder aktiv</button></span></div>`).join('')}</div>`:''}
+    ${(db.settings.dsProtokoll||[]).length?`<div class="mgrp">Löschprotokoll</div><div class="card">${db.settings.dsProtokoll.slice().reverse().map(e=>`<div class="hint" style="margin:3px 0">${new Date(e.ts).toLocaleDateString('de-DE')}: ${esc(e.text)}</div>`).join('')}</div>`:''}`;
+    el.querySelector('#ds_save').onclick=()=>{
+      db.settings.dsLink=el.querySelector('#ds_link').value.trim();
+      db.settings.dsInMail=el.querySelector('#ds_mail').checked;
+      db.settings.geoErlaubt=el.querySelector('#ds_geo').checked;
+      db.settings.verzugHinweis=el.querySelector('#ds_verz').checked;
+      save();toast('Gesichert');
+    };
+  };
+  el.__redraw=draw;draw();
+}
+function dsTextZeigen(){
+  const el=sheet('Datenschutzinformation',`<div class="card"><div style="white-space:pre-wrap;font-size:14px;line-height:1.5">${esc(dsText())}</div></div>
+    <button class="btn pri full" onclick="navigator.clipboard&&navigator.clipboard.writeText(dsText()).then(()=>toast('Kopiert'))">Text kopieren</button>`);
+  el.dataset.nodirty='1';
+}
+/* Link unter E-Mails */
+const _mailDoc51=mailDoc;
+mailDoc=function(type,id,kind){
+  const r=_mailDoc51.apply(this,arguments);
+  try{
+    const link=dsLink(),ta=document.getElementById('m_body');
+    if(link&&db.settings.dsInMail!==false&&ta&&!ta.value.includes(link))ta.value=ta.value.replace(/\s*$/,'')+`\n\nInformationen zum Datenschutz: ${link}`;
+  }catch(e){}
+  return r;
+};
+
+/* ---------- 5. Wochenabschluss ---------- */
+function wochenKey(d){const x=new Date(d||Date.now());x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return isoLocal(x);}
+function wochenPunkte(){
+  const L=brauchtListe().filter(x=>!/Backup fällig/.test(x[1]));
+  const y=String(new Date().getFullYear());
+  const ohneFoto=db.expenses.filter(e=>String(e.date||'').slice(0,4)>=String(+y-1)&&!(e.receipts||[]).length&&!e.receipt&&(+e.amount||0)>0&&!(+e.km>0)&&!e.fahrtId);
+  if(ohneFoto.length)L.push(['warn',`${ohneFoto.length} Ausgabe${ohneFoto.length>1?'n':''} ohne Belegfoto`,'Ohne Beleg erkennt das Finanzamt die Ausgabe nicht an',"go('exp')"]);
+  const ohneAdr=db.customers.filter(c=>!c.archiviert&&(!(c.street||'').trim()||!(c.zip||'').trim()||!(c.city||'').trim())&&db.jobs.some(j=>j.customerId===c.id&&j.date>=addDays(today(),-30)));
+  if(ohneAdr.length)L.push(['info',`${ohneAdr.length} aktive${ohneAdr.length>1?'':'r'} Kunde${ohneAdr.length>1?'n':''} ohne vollständige Adresse`,ohneAdr.slice(0,3).map(c=>esc(custName(c))).join(', '),`editCustomer('${ohneAdr[0].id}')`]);
+  const x=extSicherung();
+  if(x.ampel!=='gruen')L.push([x.ampel==='rot'?'bad':'warn','Sicherung außer Haus',x.tage>900?'Noch nie gesichert':`Letzte vor ${x.tage} Tagen`,syncReady()?'syncNow()':'vollSicherung()']);
+  return L;
+}
+function openWochenabschluss(){
+  const el=sheet('Wochenabschluss','<div id="wab"></div>');el.dataset.nodirty='1';
+  const draw=()=>{
+    const L=wochenPunkte(),k=wochenKey(),done=(db.settings.wochen||{})[k];
+    el.querySelector('#wab').innerHTML=`
+      <div class="card" style="--stripe:${L.length?'var(--clay)':'var(--moss)'}"><div class="lbl">Woche ab ${dDE(k)}</div>
+        <div style="font-family:var(--display);font-weight:700;font-size:24px;margin-top:4px">${L.length?L.length+' Punkt'+(L.length>1?'e':'')+' offen':'Alles erledigt.'}</div>
+        <div class="hint">${done?'Abgeschlossen am '+new Date(done).toLocaleString('de-DE'):'Einmal pro Woche durchgehen, dauert zwei Minuten.'}</div></div>
+      ${L.length?`<div class="v5list">${L.map(brauchtRow).join('')}</div>`:''}
+      <button class="btn pri full" style="margin-top:12px" id="wa_ok">${done?'Erneut abschließen':'Woche abschließen'}</button>`;
+    el.querySelector('#wa_ok').onclick=()=>{
+      if(L.length&&!confirm(`${L.length} Punkt${L.length>1?'e sind':' ist'} noch offen. Trotzdem abschließen?`))return;
+      (db.settings.wochen=db.settings.wochen||{})[k]=Date.now();save();closeSheets();render();celebrate('Woche abgeschlossen');
+    };
+  };
+  draw();
+}
+function wochenCard(){
+  const tag=new Date().getDay();
+  if(!(tag===5||tag===6||tag===0))return '';
+  if((db.settings.wochen||{})[wochenKey()])return '';
+  const n=wochenPunkte().length;
+  return `<div class="card" style="--stripe:var(--accent)"><div class="row between"><span class="lbl">Wochenabschluss</span><span class="hint">${n?n+' offen':'alles erledigt'}</span></div>
+    <button class="btn full" style="margin-top:10px" onclick="openWochenabschluss()">Woche durchgehen</button></div>`;
+}
+
+/* ---------- Einbindung: Startseite, Mehr, Speichern ---------- */
+const _vHeute51=vHeute;
+vHeute=function(){return ampelCard()+wochenCard()+_vHeute51.apply(this,arguments);};
+const _vMehr51=vMehr;
+vMehr=function(){
+  let h=_vMehr51.apply(this,arguments);
+  const x=extSicherung(),K=dsLoeschKandidaten().length;
+  const row=(cls,ic,t,s,fn,badge)=>`<button class="it" onclick="${fn}"><span class="ico ${cls}">${icoSvg(ic)}</span>
+    <div style="min-width:0"><div class="nm">${t}</div>${s?`<div class="mt">${s}</div>`:''}</div><span class="r">${badge?`<span class="ptag b">${badge}</span>`:'<span class="v5car">›</span>'}</span></button>`;
+  h=h.replace('<div class="mgrp">Daten & Sicherung</div>\n  <div class="v5list">','<div class="mgrp">Daten & Sicherung</div>\n  <div class="v5list">'
+    +row('info',IP.shield,'Vollständige Sicherung',`Daten, Rechnungs-PDFs und Belegfotos als ZIP · ${x.tage>900?'noch nie':'zuletzt vor '+x.tage+' Tag'+(x.tage===1?'':'en')}`,'vollSicherung()',x.ampel==='rot'?'!':'')
+    +row('info',IP.doc,'Sicherung laden','ZIP oder JSON wiederherstellen','vollLaden()'));
+  h=h.replace('<div class="mgrp">Arbeit</div>\n  <div class="v5list">','<div class="mgrp">Arbeit</div>\n  <div class="v5list">'
+    +row('acc',IP.check,'Wochenabschluss',(db.settings.wochen||{})[wochenKey()]?'diese Woche erledigt':'offene Punkte durchgehen','openWochenabschluss()'));
+  h=h.replace('<div class="mgrp">Einstellungen</div>\n  <div class="v5list">','<div class="mgrp">Einstellungen</div>\n  <div class="v5list">'
+    +row('',IP.shield,'Datenschutz','Kundeninfo, Verzeichnis, Löschen','openDatenschutz()',K||''));
+  /* alte Einträge, die jetzt doppelt wären, ausblenden */
+  h=h.replace(/<button class="it" onclick="importJSON\(\)">[\s\S]*?<\/button>/,'');
+  return h;
+};
+const _save51=save;
+save=async function(){const r=await _save51.apply(this,arguments);setTimeout(()=>{archivLauf();},50);return r;};
+/* Einmalig: Bestand vor 5.1 kennzeichnen, dann im Hintergrund archivieren */
+const _v5Init51=v5Init;
+v5Init=function(){
+  try{
+    if(!db.settings.v51){
+      db.invoices.forEach(i=>{if(!i.draft&&!i.arch){i.altbestand=true;if(!i.empf)i.empf=addrLines(cust(i.customerId));}});
+      db.settings.v51=Date.now();saveQuiet();
+    }
+  }catch(e){console.warn(e);}
+  setTimeout(()=>archivLauf(),3000);
+  return _v5Init51.apply(this,arguments);
+};
+
+
+/* ---------- 5.1: Standard-Anfahrt in neuen Rechnungen und Angeboten ----------
+   Florian berechnet fast immer „An- und Abfahrt inkl. Verschleiß und
+   Betriebskosten“ (55 €). Besorgungsfahrt nur bei Bedarf aus dem Katalog.
+   Fahrtkosten zählen bei § 35a als Arbeitskosten (ARB_RX „fahrt“). */
+const ANFAHRT_TXT='An- und Abfahrt inkl. Verschleiß und Betriebskosten';
+const istAnfahrt=p=>/an-?\s*(und\s*)?abfahrt|anfahrt/i.test(p&&(p.desc||p.name)||'');
+function anfahrtItem(){return db.items.find(i=>istAnfahrt(i))||{name:ANFAHRT_TXT,unit:'Pauschal',price:preise().anfahrt||55};}
+function anfahrtPos(){const i=anfahrtItem();return {desc:i.name,qty:1,unit:i.unit||'Pauschal',price:+i.price||0,comment:'',_auto:true};}
+const _editDoc51b=editDoc;
+editDoc=function(type,id){
+  const r=_editDoc51b.apply(this,arguments);
+  try{if(!id&&cur&&cur._new){
+    /* archivierte Kunden nie vorauswählen */
+    if(cust(cur.customerId).archiviert){const k=db.customers.find(c=>!c.archiviert);cur.customerId=k?k.id:'';}
+    if(db.settings.anfahrtAuto!==false&&!(cur.positions||[]).length)cur.positions.push(anfahrtPos());
+    drawEditor();}}catch(e){console.warn(e);}
+  return r;
+};
+/* Beim Auftrag → Rechnung steht die Arbeit oben, die Anfahrt darunter */
+const _jobZuRechnung51=jobZuRechnung;
+jobZuRechnung=function(id){
+  const r=_jobZuRechnung51.apply(this,arguments);
+  try{if(cur&&cur.positions&&cur.positions[0]&&cur.positions[0]._auto&&cur.positions.length>1){cur.positions.push(cur.positions.shift());drawEditor();}}catch(e){}
+  return r;
+};
+/* _auto ist nur eine Markierung für den Editor */
+const _saveDoc51b=saveDoc;
+saveDoc=function(draft){try{(cur&&cur.positions||[]).forEach(p=>delete p._auto);}catch(e){}return _saveDoc51b.apply(this,arguments);};
+/* Einmalig: bestehenden Katalog umstellen */
+function katalog51(){
+  if(db.settings.kat51)return;
+  const alt=db.items.find(i=>/abfahrt.*besorgung|besorgung.*abfahrt/i.test(i.name||''));
+  if(alt){alt.name=ANFAHRT_TXT;alt.unit='Pauschal';alt.price=55;}
+  else if(!db.items.some(istAnfahrt))db.items.unshift({id:uid(),name:ANFAHRT_TXT,unit:'Pauschal',price:55});
+  if(!db.items.some(i=>/besorgung/i.test(i.name||'')))db.items.push({id:uid(),name:'Besorgungsfahrt (Material, Entsorgung)',unit:'Pauschal',price:30});
+  /* Anfahrt nach vorn, damit sie im Katalog oben steht */
+  const k=db.items.findIndex(istAnfahrt);if(k>0)db.items.unshift(db.items.splice(k,1)[0]);
+  if(db.settings.preise5&&(+db.settings.preise5.anfahrt===15))db.settings.preise5.anfahrt=55;
+  db.settings.kat51=Date.now();
+}
+const _v5Init51b=v5Init;
+v5Init=function(){try{katalog51();saveQuiet();}catch(e){console.warn(e);}return _v5Init51b.apply(this,arguments);};
 
 /* ---------- Start ---------- */
 document.getElementById('hlogo').src=db.settings.company.logo||LOGO_MARK;
