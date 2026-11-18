@@ -1266,9 +1266,10 @@ const ICON={sync:'<svg class="ic" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const DEFAULT={
  settings:{
-  company:{name:'Garten Flo',claim:'GARTENPFLEGE',owner:'Florian Höcherl',street:'Meisterweg 23',zip:'91085',city:'Weisendorf',country:'Deutschland',
-    phone:'+49 15758531230',email:'garten-flo@gmx.net',taxNumber:'216/229/50755',bankName:'ING',
-    iban:'DE51 5001 0517 5568 1903 81',bic:'INGDDEFFXXX',accountHolder:'',logo:''},
+  /* Seit 5.2 ohne persönliche Daten: der Quelltext ist öffentlich. Eigene Daten stehen in den Einstellungen. */
+  company:{name:'Garten Flo',claim:'GARTENPFLEGE',owner:'',street:'',zip:'',city:'',country:'Deutschland',
+    phone:'',email:'',taxNumber:'',bankName:'',
+    iban:'',bic:'',accountHolder:'',logo:''},
   defaults:{paymentDays:7,offerValidDays:14,klein:true,vat:19,hourRate:45,
     introInv:'vielen Dank für Ihren Auftrag und das damit verbundene Vertrauen!\nHiermit stelle ich Ihnen die folgenden Leistungen in Rechnung:',
     introOff:'vielen Dank für Ihre Anfrage!\nGerne unterbreite ich Ihnen folgendes Angebot:'},
@@ -1430,13 +1431,16 @@ if(navigator.storage&&navigator.storage.persist){
     try{
       const changed=await ensureMediaPersisted();
       if(changed){
-        try{localStorage.setItem(LS,JSON.stringify(db));}catch(e){}
+        await persistDb();
         if(typeof render==='function')render();
       }
     }catch(e){console.warn('Foto-Migration fehlgeschlagen',e);}
   },300);
 })();
 function load(){
+  /* Für den Start merken, ob der Browserspeicher leer war oder zuletzt voll lief
+     (dann liegt der neueste Stand nur in IndexedDB, siehe idbBoot) */
+  try{window.__bootLs={leer:!localStorage.getItem(LS),flag:localStorage.getItem(LS+'_nurIdb')==='1'};}catch(e){window.__bootLs={leer:true,flag:false};}
   try{const r=JSON.parse(localStorage.getItem(LS));if(r)return migrate(r);}catch(e){}
   const d=structuredClone(DEFAULT);
   d.items=SEED_ITEMS.map(i=>({id:uid(),...i}));
@@ -1457,12 +1461,10 @@ function migrate(r){const d=structuredClone(DEFAULT);
   });
   return r;}
 async function save(){await ensureMediaPersisted();trackChanges();
-  try{localStorage.setItem(LS,JSON.stringify(db));}
-  catch(e){toast('Speicher voll — bitte alte Auftragsfotos löschen');console.warn(e);return;}
+  if(!await persistDb())return;
   syncSchedule();}
 async function saveQuiet(){await ensureMediaPersisted();
-  try{localStorage.setItem(LS,JSON.stringify(db));}
-  catch(e){toast('Speicher voll — bitte alte Auftragsfotos löschen');console.warn(e);}}
+  await persistDb();}
 
 /* ===================== Helfer ===================== */
 const nf=new Intl.NumberFormat('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -7876,7 +7878,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.1.2';
+const APP_VERSION5='5.2.0';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -9420,7 +9422,7 @@ function snapIdb(){return new Promise((res,rej)=>{const r=indexedDB.open(SNAP_DB
 async function snapTake(force){
   try{const day=today();if(!force&&ui.snapLast&&new Date(ui.snapLast).toISOString().slice(0,10)===day&&ui.snapDay===day)return;
     const d=await snapIdb(),tx=d.transaction('s','readwrite'),st=tx.objectStore('s');
-    st.put({day,ts:Date.now(),data:localStorage.getItem(LS)||JSON.stringify(db)});
+    st.put({day,ts:Date.now(),data:JSON.stringify(db)});
     const keys=await new Promise(r=>{const q=st.getAllKeys();q.onsuccess=()=>r(q.result||[]);});
     keys.sort().slice(0,-14).forEach(k=>st.delete(k));
     await new Promise(r=>tx.oncomplete=r);ui.snapLast=Date.now();ui.snapDay=day;uiSave();
@@ -9441,9 +9443,9 @@ async function snapRestore(day){
   try{const d=await snapIdb();const s=await new Promise(r=>{const q=d.transaction('s').objectStore('s').get(day);q.onsuccess=()=>r(q.result);});
     if(!s)return;
     if(!confirm(`Datenstand vom ${new Date(s.ts).toLocaleString('de-DE')} wiederherstellen?\n\nAlles, was du danach eingegeben hast, geht verloren. Der aktuelle Stand wird vorher als Sicherung abgelegt.`))return;
-    const cur=localStorage.getItem(LS);const tx=d.transaction('s','readwrite');tx.objectStore('s').put({day:'vor-wiederherstellung-'+Date.now(),ts:Date.now(),data:cur});
+    const cur=JSON.stringify(db);const tx=d.transaction('s','readwrite');tx.objectStore('s').put({day:'vor-wiederherstellung-'+Date.now(),ts:Date.now(),data:cur});
     await new Promise(r=>tx.oncomplete=r);
-    localStorage.setItem(LS,s.data);location.reload();
+    await persistRaw(s.data);location.reload();
   }catch(e){toast('Wiederherstellen fehlgeschlagen: '+e.message);}
 }
 
@@ -10569,6 +10571,165 @@ routeKm=async function(a,b){
     throw new Error(navigator.onLine===false?'Kein Internet':'Beide Routendienste nicht erreichbar');
   }
 };
+
+/* =====================================================================
+   VERSION 5.2 – Daten sicher
+   1. Zweiter Speicher in IndexedDB: Jeder Speichervorgang landet im
+      bisherigen Browserspeicher (localStorage, ca. 5 MB) UND in der
+      Gerätedatenbank (IndexedDB, praktisch ohne Grenze). Läuft der alte
+      Speicher voll, arbeitet die App nahtlos aus IndexedDB weiter.
+   2. GitHub-Sync schreibt nur noch in private Repositories.
+   3. Optionale App-Sperre mit PIN (Sichtschutz, nur dieses Gerät).
+   ===================================================================== */
+var IDB_BOOT;
+function mainIdb(){return new Promise((res,rej)=>{
+  if(typeof indexedDB==='undefined')return rej(new Error('IndexedDB fehlt'));
+  const r=indexedDB.open('buero_daten',1);
+  r.onupgradeneeded=()=>r.result.createObjectStore('kv');
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+async function idbGet(){const d=await mainIdb();return new Promise((res,rej)=>{
+  const q=d.transaction('kv').objectStore('kv').get('main');q.onsuccess=()=>res(q.result||null);q.onerror=()=>rej(q.error);});}
+async function idbPut(str){const d=await mainIdb();return new Promise((res,rej)=>{
+  const tx=d.transaction('kv','readwrite');tx.objectStore('kv').put({ts:Date.now(),data:str},'main');
+  tx.oncomplete=()=>res(true);tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error);});}
+/* Schreibt einen Datenstand in beide Speicher. Passt er nicht mehr in den
+   alten Speicher, wird dort Platz frei gemacht – aber erst, NACHDEM er
+   sicher in IndexedDB liegt. Rückgabe false = nirgends gespeichert. */
+async function persistStr(str){
+  let lsOk=true;try{localStorage.setItem(LS,str);}catch(e){lsOk=false;}
+  let idbOk=false;try{idbOk=await idbPut(str);}catch(e){console.warn('IndexedDB',e);}
+  if(lsOk){try{localStorage.removeItem(LS+'_nurIdb');}catch(e){}}
+  else if(idbOk){try{localStorage.removeItem(LS);localStorage.setItem(LS+'_nurIdb','1');}catch(e){}}
+  if(!lsOk&&!idbOk){toast('Speichern fehlgeschlagen — bitte sofort eine Vollständige Sicherung anlegen');return false;}
+  return true;
+}
+async function persistDb(){
+  if(!IDB_BOOT)IDB_BOOT=idbBoot();
+  try{await IDB_BOOT;}catch(e){}
+  return persistStr(JSON.stringify(db));
+}
+async function persistRaw(str){return persistStr(str);}
+/* Beim Start: War der alte Speicher leer oder zuletzt voll, liegt der
+   neueste Stand in IndexedDB → von dort laden. */
+async function idbBoot(){
+  const b=window.__bootLs||{};
+  if(!(b.leer||b.flag))return false;
+  let rec=null;try{rec=await idbGet();}catch(e){return false;}
+  if(!rec||!rec.data)return false;
+  let r;try{r=JSON.parse(rec.data);}catch(e){console.warn('IndexedDB-Stand unlesbar',e);return false;}
+  db=migrate(r);
+  setTimeout(()=>{try{drawTabs();render(true);}catch(e){console.warn(e);}},0);
+  return true;
+}
+if(!IDB_BOOT)IDB_BOOT=idbBoot();
+IDB_BOOT.then(ok=>{if(ok)saveQuiet();}).catch(()=>{});
+
+/* ---------- 2. Sync nur in private Repositories ---------- */
+const ghPrivatOk={};
+async function ghPrivatPruefen(cfg){
+  const k=(cfg.owner+'/'+cfg.repo).toLowerCase();
+  if(ghPrivatOk[k])return;
+  let j=null;
+  try{const r=await fetch(`https://api.github.com/repos/${cfg.owner}/${cfg.repo}`,{headers:ghHead(cfg),cache:'no-store'});if(r.ok)j=await r.json();}catch(e){}
+  if(j&&j.private===false)throw new Error(`Das Repository ${cfg.owner}/${cfg.repo} ist öffentlich. Kundendaten dürfen dort nicht liegen — bitte in den Sync-Einstellungen ein privates Repository eintragen.`);
+  if(j&&j.private===true)ghPrivatOk[k]=true;
+}
+const _ghPut52=ghPut;
+ghPut=async function(cfg){await ghPrivatPruefen(cfg);return _ghPut52.apply(this,arguments);};
+
+/* ---------- 3. App-Sperre mit PIN ---------- */
+function pinCfg(){try{return JSON.parse(localStorage.getItem('buero_pin'))||null;}catch(e){return null;}}
+async function pinHash(pin,salt){
+  const data=new TextEncoder().encode(salt+':'+pin);
+  if(window.crypto&&crypto.subtle){const h=await crypto.subtle.digest('SHA-256',data);return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('');}
+  let h=2166136261;for(const b of data){h^=b;h=Math.imul(h,16777619)>>>0;}return 'f'+h.toString(16);
+}
+let pinLocked=false,pinHiddenAt=0,pinFails=0,pinWaitUntil=0;
+function pinLock(){
+  if(!pinCfg()||pinLocked)return;
+  pinLocked=true;
+  const el=document.createElement('div');el.id='pinLock';
+  el.style.cssText='position:fixed;inset:0;z-index:2147483000;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px';
+  el.innerHTML=`<img src="${LOGO_MARK}" alt="" style="width:72px;height:72px">
+    <div style="font-weight:700;font-size:18px;color:var(--txt)">Büro gesperrt</div>
+    <input id="pinIn" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="8" aria-label="PIN"
+      style="font-size:26px;text-align:center;letter-spacing:10px;width:220px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--txt)">
+    <button class="btn pri" id="pinGo" style="min-width:220px">Entsperren</button>
+    <div id="pinMsg" style="min-height:20px;color:var(--red);font-size:14px"></div>
+    <button class="btn sm" id="pinVergessen">PIN vergessen?</button>`;
+  document.body.appendChild(el);
+  const inp=el.querySelector('#pinIn'),msg=el.querySelector('#pinMsg');
+  const go=async()=>{
+    if(Date.now()<pinWaitUntil){msg.textContent='Bitte '+Math.ceil((pinWaitUntil-Date.now())/1000)+' s warten';return;}
+    const c=pinCfg();if(!c){pinUnlock();return;}
+    if(await pinHash(inp.value,c.salt)===c.hash){pinFails=0;pinUnlock();return;}
+    pinFails++;inp.value='';
+    if(pinFails>=5){pinWaitUntil=Date.now()+30000;pinFails=0;msg.textContent='5× falsch — 30 Sekunden warten';}
+    else msg.textContent='Falsche PIN';
+  };
+  el.querySelector('#pinGo').onclick=go;
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter')go();});
+  el.querySelector('#pinVergessen').onclick=()=>{
+    const iban=String(db.settings.company.iban||'').replace(/\s/g,'');
+    if(iban.length>=4){
+      const v=prompt('Zum Zurücksetzen die letzten 4 Ziffern deiner IBAN eingeben (stehen auch auf jeder Rechnung):');
+      if(v===null)return;
+      if(v.replace(/\s/g,'')!==iban.slice(-4)){msg.textContent='Stimmt nicht';return;}
+    }else if(!confirm('PIN entfernen?'))return;
+    try{localStorage.removeItem('buero_pin');}catch(e){}
+    pinUnlock();toast('PIN entfernt — unter Mehr › App-Sperre neu setzen');
+  };
+  setTimeout(()=>inp.focus(),50);
+}
+function pinUnlock(){pinLocked=false;const el=document.getElementById('pinLock');if(el)el.remove();}
+document.addEventListener('visibilitychange',()=>{
+  const c=pinCfg();if(!c)return;
+  if(document.hidden){pinHiddenAt=Date.now();if(!(+c.min))pinLock();}
+  else if(pinHiddenAt&&Date.now()-pinHiddenAt>=(+c.min||0)*60000)pinLock();
+});
+function openPin(){
+  const c=pinCfg();
+  const minSel=v=>`<label class="f"><span>Sperren, wenn die App so lange im Hintergrund war</span><select id="pin_min">
+    ${[[0,'sofort'],[1,'1 Minute'],[5,'5 Minuten'],[15,'15 Minuten'],[60,'1 Stunde']].map(([m,l])=>`<option value="${m}" ${+v===m?'selected':''}>${l}</option>`).join('')}</select></label>`;
+  const el=sheet('App-Sperre',`<div class="card" data-nodirty>
+    ${c?`<div class="lbl" style="margin-bottom:8px">PIN ist aktiv</div>${minSel(c.min)}
+      <button class="btn pri full" id="pin_lock" style="margin-top:10px">Jetzt sperren</button>
+      <label class="f" style="margin-top:14px"><span>Aktuelle PIN zum Ausschalten</span><input id="pin_alt" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></label>
+      <button class="btn full dan" id="pin_aus" style="margin-top:8px">PIN ausschalten</button>`
+    :`<div class="lbl" style="margin-bottom:8px">PIN festlegen</div>
+      <label class="f"><span>PIN (4 bis 8 Ziffern)</span><input id="pin_a" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></label>
+      <label class="f"><span>PIN wiederholen</span><input id="pin_b" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></label>
+      ${minSel(5)}
+      <button class="btn pri full" id="pin_an" style="margin-top:10px">PIN einschalten</button>`}
+    </div>
+    <div class="hint" style="margin:10px 2px">Die Sperre ist ein Sichtschutz, falls jemand dein entsperrtes Handy in der Hand hat. Sie verschlüsselt die Daten nicht. Die PIN gilt nur auf diesem Gerät und wird nicht mitgesichert oder synchronisiert. PIN vergessen: Mit den letzten 4 Ziffern deiner IBAN lässt sie sich zurücksetzen, dabei gehen keine Daten verloren.</div>`);
+  el.dataset.nodirty='1';
+  const g=s=>el.querySelector(s);
+  if(c){
+    g('#pin_min').onchange=e=>{const n=pinCfg();if(n){n.min=+e.target.value;localStorage.setItem('buero_pin',JSON.stringify(n));toast('Gespeichert');}};
+    g('#pin_lock').onclick=()=>{closeSheets();pinLock();};
+    g('#pin_aus').onclick=async()=>{
+      if(await pinHash(g('#pin_alt').value,c.salt)!==c.hash){toast('PIN stimmt nicht');return;}
+      localStorage.removeItem('buero_pin');closeSheets();render();toast('App-Sperre aus');};
+  }else{
+    g('#pin_an').onclick=async()=>{
+      const a=g('#pin_a').value,b=g('#pin_b').value;
+      if(!/^\d{4,8}$/.test(a)){toast('Bitte 4 bis 8 Ziffern');return;}
+      if(a!==b){toast('Die beiden PINs sind unterschiedlich');return;}
+      const salt=[...crypto.getRandomValues(new Uint8Array(8))].map(x=>x.toString(16).padStart(2,'0')).join('');
+      localStorage.setItem('buero_pin',JSON.stringify({salt,hash:await pinHash(a,salt),min:+g('#pin_min').value}));
+      closeSheets();render();toast('App-Sperre ist an');};
+  }
+}
+const _vMehr52=vMehr;
+vMehr=function(){
+  const h=_vMehr52.apply(this,arguments);
+  const an=!!pinCfg();
+  const row=`<button class="it" onclick="openPin()"><span class="ico ">${icoSvg(IP.shield)}</span>
+    <div style="min-width:0"><div class="nm">App-Sperre</div><div class="mt">${an?'PIN aktiv':'aus · PIN beim Öffnen verlangen'}</div></div><span class="r"><span class="v5car">›</span></span></button>`;
+  return h.replace('<div class="mgrp">Einstellungen</div>\n  <div class="v5list">','<div class="mgrp">Einstellungen</div>\n  <div class="v5list">'+row);
+};
+if(pinCfg())pinLock();
 
 /* ---------- Start ---------- */
 document.getElementById('hlogo').src=db.settings.company.logo||LOGO_MARK;
