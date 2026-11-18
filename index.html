@@ -7950,7 +7950,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.5.0';
+const APP_VERSION5='5.6.0';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -11108,6 +11108,183 @@ vGeld=function(){
     const l=h.indexOf('<div class="v5list">',k);
     return l<0?h:h.slice(0,l+20)+'\n    '+row+h.slice(l+20);
   }catch(e){console.warn(e);return h;}
+};
+
+/* =====================================================================
+   VERSION 5.6 — E-Rechnungen von Lieferanten empfangen
+   Seit 1.1.2025 muss jedes Unternehmen E-Rechnungen (XRechnung, ZUGFeRD)
+   annehmen können. Die App liest XRechnung (UBL und CII) und ZUGFeRD/
+   Factur-X-PDFs, füllt die Ausgabe vor und speichert die Original-XML
+   unverändert mit (GoBD: die XML ist das Original, nicht die Ansicht).
+   Keine Prüfung gegen das offizielle Regelwerk (KoSIT-Validator).
+   ===================================================================== */
+const ER_MAX=3*1024*1024;
+function erParse(xml){
+  if(!xml||xml.length>ER_MAX)throw new Error('Datei leer oder zu groß');
+  const doc=new DOMParser().parseFromString(xml,'application/xml');
+  if(doc.getElementsByTagName('parsererror').length)throw new Error('Keine gültige XML-Datei');
+  const root=doc.documentElement,rn=root.localName;
+  const all=(el,n)=>[...el.getElementsByTagNameNS('*',n)];
+  const one=(el,n)=>all(el,n)[0]||null;
+  const tx=(el,...path)=>{let c=el;for(const n of path){c=c&&one(c,n);}return c?c.textContent.trim():'';};
+  const kid=(el,n)=>el?[...el.children].find(c=>c.localName===n)||null:null;
+  const kt=(el,n)=>{const c=kid(el,n);return c?c.textContent.trim():'';};
+  const zahl=s=>{const v=parseFloat(String(s||'').replace(',','.'));return isFinite(v)?v:0;};
+  const d102=s=>{s=String(s||'').trim();return /^\d{8}$/.test(s)?s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8):(/^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):'');};
+  const r={format:'',nr:'',datum:'',faellig:'',lieferant:'',ustId:'',iban:'',netto:0,ust:0,brutto:0,zahlbar:0,saetze:[],zeilen:[],gutschrift:false,waehrung:'EUR'};
+  if(rn==='CrossIndustryInvoice'){
+    r.format=/xrechnung/i.test(tx(root,'GuidelineSpecifiedDocumentContextParameter','ID'))?'XRechnung (CII)':'ZUGFeRD / Factur-X (CII)';
+    const ed=one(root,'ExchangedDocument');
+    r.nr=kt(ed,'ID');r.datum=d102(tx(ed,'IssueDateTime','DateTimeString'));
+    r.gutschrift=['381','261'].includes(kt(ed,'TypeCode'));
+    const seller=one(root,'SellerTradeParty');
+    r.lieferant=kt(seller,'Name');
+    r.ustId=all(seller||root,'SpecifiedTaxRegistration').map(x=>tx(x,'ID')).find(v=>/^[A-Z]{2}/.test(v))||'';
+    const ms=one(root,'SpecifiedTradeSettlementHeaderMonetarySummation');
+    r.netto=zahl(tx(ms,'TaxBasisTotalAmount'));r.ust=zahl(tx(ms,'TaxTotalAmount'));
+    r.brutto=zahl(tx(ms,'GrandTotalAmount'));r.zahlbar=zahl(tx(ms,'DuePayableAmount'))||r.brutto;
+    const hs=one(root,'ApplicableHeaderTradeSettlement');
+    r.waehrung=kt(hs,'InvoiceCurrencyCode')||'EUR';
+    r.saetze=(hs?[...hs.children].filter(c=>c.localName==='ApplicableTradeTax'):[]).map(t=>({satz:zahl(kt(t,'RateApplicablePercent')),basis:zahl(kt(t,'BasisAmount')),betrag:zahl(kt(t,'CalculatedAmount'))}));
+    r.faellig=d102(tx(root,'SpecifiedTradePaymentTerms','DueDateDateTime','DateTimeString'));
+    r.iban=tx(root,'PayeePartyCreditorFinancialAccount','IBANID');
+    r.zeilen=all(root,'IncludedSupplyChainTradeLineItem').map(l=>({name:tx(l,'SpecifiedTradeProduct','Name'),menge:zahl(tx(l,'BilledQuantity')),betrag:zahl(tx(l,'LineTotalAmount'))}));
+  }else if(rn==='Invoice'||rn==='CreditNote'){
+    r.format='XRechnung (UBL)';r.gutschrift=rn==='CreditNote';
+    r.nr=kt(root,'ID');r.datum=d102(kt(root,'IssueDate'));r.faellig=d102(kt(root,'DueDate'))||d102(tx(root,'PaymentMeans','PaymentDueDate'));
+    r.waehrung=kt(root,'DocumentCurrencyCode')||'EUR';
+    const sp=one(root,'AccountingSupplierParty');
+    r.lieferant=tx(sp,'PartyLegalEntity','RegistrationName')||tx(sp,'PartyName','Name');
+    r.ustId=tx(sp,'PartyTaxScheme','CompanyID');
+    const mt=one(root,'LegalMonetaryTotal');
+    r.netto=zahl(kt(mt,'TaxExclusiveAmount'));r.brutto=zahl(kt(mt,'TaxInclusiveAmount'));r.zahlbar=zahl(kt(mt,'PayableAmount'))||r.brutto;
+    const tt=kid(root,'TaxTotal');r.ust=zahl(kt(tt,'TaxAmount'));
+    r.saetze=all(tt||root,'TaxSubtotal').map(s=>({satz:zahl(tx(s,'TaxCategory','Percent')),basis:zahl(kt(s,'TaxableAmount')),betrag:zahl(kt(s,'TaxAmount'))}));
+    r.iban=tx(root,'PaymentMeans','PayeeFinancialAccount','ID');
+    r.zeilen=all(root,rn==='CreditNote'?'CreditNoteLine':'InvoiceLine').map(l=>({name:tx(l,'Item','Name'),
+      menge:zahl(kt(l,'InvoicedQuantity')||kt(l,'CreditedQuantity')),betrag:zahl(kt(l,'LineExtensionAmount'))}));
+  }else throw new Error('Unbekanntes Format ('+rn+'). Erwartet XRechnung oder ZUGFeRD.');
+  if(!r.brutto&&r.netto)r.brutto=+(r.netto+r.ust).toFixed(2);
+  if(!r.nr||!r.brutto)throw new Error('Rechnungsnummer oder Betrag fehlt in der Datei');
+  return r;
+}
+/* Hinweise, die der Nutzer vor dem Sichern sehen sollte */
+function erHinweise(r){
+  const h=[];
+  if(r.waehrung!=='EUR')h.push('Währung '+r.waehrung+': Betrag in Euro umrechnen.');
+  if(r.saetze.filter(s=>s.basis||s.betrag).length>1)h.push('Mehrere Steuersätze ('+r.saetze.map(s=>s.satz+' %').join(', ')+'). Die Ausgabe kennt nur einen Satz; ich habe den mit der größten Summe gewählt. Für den Vorsteuerabzug (nur bei Regelbesteuerung) bitte prüfen oder aufteilen.');
+  if(r.gutschrift)h.push('Das ist eine Gutschrift bzw. Rechnungskorrektur. Sie mindert deine Ausgaben, der Betrag ist deshalb negativ.');
+  const sz=sum(r.zeilen,z=>z.betrag);
+  if(r.zeilen.length&&r.netto&&Math.abs(sz-r.netto)>0.05)h.push('Summe der Positionen ('+eur(sz)+') weicht vom Nettobetrag ('+eur(r.netto)+') ab, z. B. wegen Rabatten oder Zuschlägen.');
+  if(Math.abs(r.zahlbar-r.brutto)>0.01)h.push('Zahlbetrag '+eur(r.zahlbar)+' weicht vom Rechnungsbetrag ab (Anzahlung oder Abzug). Als Ausgabe zählt, was du tatsächlich zahlst.');
+  const dop=db.expenses.find(x=>x.eRech&&x.eRech.nr===r.nr&&(x.eRech.lieferant||'')===r.lieferant);
+  if(dop)h.push('Diese Rechnung wurde am '+dDE(dop.date)+' schon eingelesen ('+eur(dop.amount)+').');
+  return h;
+}
+function erPreset(r,xml,datei){
+  const haupt=r.saetze.slice().sort((a,b)=>(b.basis||0)-(a.basis||0))[0];
+  const satz=haupt?haupt.satz:(r.netto?Math.round(r.ust/r.netto*100):19);
+  const z=r.zeilen.filter(x=>x.name);
+  const desc=(z[0]?z[0].name:'Rechnung '+r.nr)+(z.length>1?' u. a. ('+z.length+' Positionen)':'');
+  const s=r.gutschrift?-1:1;
+  return {date:r.datum||today(),desc:desc.slice(0,120),vendor:r.lieferant,amount:+(s*Math.abs(r.brutto)).toFixed(2),
+    vat:[19,7,0].includes(satz)?satz:19,
+    eRech:{format:r.format,nr:r.nr,lieferant:r.lieferant,ustId:r.ustId,datum:r.datum,faellig:r.faellig,iban:r.iban,
+      netto:r.netto,ust:r.ust,brutto:r.brutto,zahlbar:r.zahlbar,zeilen:r.zeilen.slice(0,50),datei:datei||'',xml,eingelesen:nowIso()}};
+}
+/* ZUGFeRD / Factur-X: eingebettete XML aus dem PDF holen */
+async function erPdfXml(buf){
+  const u8=new Uint8Array(buf);let s='';for(let i=0;i<u8.length;i+=8192)s+=String.fromCharCode.apply(null,u8.subarray(i,i+8192));
+  let k=0;
+  while((k=s.indexOf('/EmbeddedFile',k))>=0){
+    const objStart=s.lastIndexOf(' obj',k),st=s.indexOf('stream',k);
+    k+=13;
+    if(st<0||objStart<0)continue;
+    const dict=s.slice(objStart,st);
+    if(/\/Type\s*\/Filespec/.test(dict)&&!/\/Subtype/.test(dict))continue;
+    let a=st+6;if(s[a]==='\r')a++;if(s[a]==='\n')a++;
+    const lm=dict.match(/\/Length\s+(\d+)(?!\s+\d+\s+R)/);
+    const e=lm?a+(+lm[1]):s.indexOf('endstream',a);
+    if(e<=a)continue;
+    let bytes=u8.subarray(a,e);
+    if(/\/FlateDecode/.test(dict)){
+      try{bytes=new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());}catch(err){continue;}
+    }
+    const txt=new TextDecoder('utf-8').decode(bytes);
+    if(/CrossIndustryInvoice|urn:oasis:names:specification:ubl/.test(txt))return txt.replace(/^﻿/,'');
+  }
+  return null;
+}
+async function erDatei(f){
+  if(f.size>ER_MAX*4)throw new Error('Datei zu groß');
+  if(/\.xml$/i.test(f.name)||/xml/.test(f.type)){const xml=await f.text();return {xml,pdf:null};}
+  if(/\.pdf$/i.test(f.name)||f.type==='application/pdf'){
+    const xml=await erPdfXml(await f.arrayBuffer());
+    if(!xml)throw new Error('In diesem PDF steckt keine E-Rechnung (keine ZUGFeRD-/Factur-X-Daten). Bitte wie gewohnt als Beleg fotografieren oder anhängen.');
+    return {xml,pdf:f};
+  }
+  throw new Error('Bitte eine .xml-Datei oder ein ZUGFeRD-PDF wählen');
+}
+async function erEinlesen(f){
+  try{
+    const {xml,pdf}=await erDatei(f);
+    const r=erParse(xml),p=erPreset(r,xml,f.name);
+    if(pdf){try{p.receipts=await fileToImages(pdf,6);p.receipt=p.receipts[0]||'';}catch(e){p.receipts=[];}}
+    closeSheets();editExpense(null,false,p);
+    toast('E-Rechnung gelesen, bitte prüfen und sichern');
+    return p;
+  }catch(err){toast(err.message||'E-Rechnung konnte nicht gelesen werden');console.warn(err);return null;}
+}
+function erWaehlen(){
+  const i=document.createElement('input');i.type='file';i.accept='.xml,.pdf,application/xml,text/xml,application/pdf';
+  i.onchange=()=>{const f=i.files&&i.files[0];if(f)erEinlesen(f);};i.click();
+}
+function erXmlLaden(id){
+  const e=db.expenses.find(x=>x.id===id);if(!e||!e.eRech||!e.eRech.xml)return;
+  dl((e.eRech.datei&&/\.xml$/i.test(e.eRech.datei)?e.eRech.datei:(e.eRech.nr||'e-rechnung').replace(/[^\w.-]/g,'_')+'.xml'),e.eRech.xml,'application/xml');
+}
+function erKarte(er,id){
+  return `<div class="card" id="e_er" style="--stripe:var(--accent)">
+    <div class="row between"><span class="lbl">E-Rechnung</span><span class="hint">${esc(er.format||'')}</span></div>
+    <div style="margin-top:6px"><b>${esc(er.lieferant||'')}</b> · Nr. ${esc(er.nr||'')} · ${dDE(er.datum||'')}</div>
+    <div class="kv"><span>Netto</span><span class="mono">${eur(er.netto)}</span></div>
+    <div class="kv"><span>Umsatzsteuer</span><span class="mono">${eur(er.ust)}</span></div>
+    <div class="kv"><span><b>Brutto</b></span><b class="mono">${eur(er.brutto)}</b></div>
+    ${er.faellig?`<div class="kv"><span>Fällig</span><span>${dDE(er.faellig)}</span></div>`:''}
+    ${er.iban?`<div class="kv" style="border-bottom:0"><span>IBAN</span><span class="mono" style="font-size:13px">${esc(er.iban)}</span></div>`:''}
+    ${(er.zeilen||[]).length?`<details style="margin-top:6px"><summary class="hint">${er.zeilen.length} Position${er.zeilen.length>1?'en':''}</summary>
+      ${er.zeilen.map(z=>`<div class="kv"><span>${esc(z.name||'')}${z.menge?` <span class="hint">× ${nf.format(z.menge)}</span>`:''}</span><span class="mono">${eur(z.betrag)}</span></div>`).join('')}</details>`:''}
+    <div class="hint" style="margin-top:8px">Die Original-XML wird unverändert mit der Ausgabe gespeichert und ist in der Sicherung enthalten. Sie ist der Beleg, den du aufbewahren musst.</div>
+    ${id?`<button class="btn sm" style="margin-top:8px" onclick="erXmlLaden('${id}')">Original-XML speichern</button>`:''}
+  </div>`;
+}
+const _editExpense56=editExpense;
+editExpense=function(id,autoScan,preset){
+  const r=_editExpense56.apply(this,arguments);
+  try{
+    const sh=[...document.querySelectorAll('.sheet')].pop(),body=sh&&sh.querySelector('.body'),first=body&&body.querySelector('.card');
+    const ex=id?db.expenses.find(x=>x.id===id):null,er=(ex&&ex.eRech)||(preset&&preset.eRech);
+    if(first&&er){
+      const d=document.createElement('div');
+      const h=!id&&preset&&preset.eRech?erHinweise(Object.assign(erParse(preset.eRech.xml))):[];
+      d.innerHTML=(h.length?`<div class="warn" id="e_erh">${h.map(esc).join('<br>')}</div>`:'')+erKarte(er,id);
+      [...d.children].forEach(c=>body.insertBefore(c,first));
+    }else if(first&&!id){
+      const b=document.createElement('button');b.type='button';b.className='btn full';b.id='e_erbtn';b.style.marginBottom='10px';
+      b.textContent='E-Rechnung einlesen (XML oder ZUGFeRD-PDF)';b.onclick=erWaehlen;
+      body.insertBefore(b,first);
+    }
+  }catch(e){console.warn(e);}
+  return r;
+};
+/* Ausgaben-Seite: eigener Knopf neben dem Belegscan */
+const _vExpenses56=vExpenses;
+vExpenses=function(){
+  const h=_vExpenses56.apply(this,arguments);
+  try{
+    const m='<button class="btn full" style="margin-top:8px" onclick="openBatch()">';
+    return h.includes(m)?h.replace(m,'<button class="btn full" style="margin-top:8px" onclick="erWaehlen()">🧾 E-Rechnung (XML / ZUGFeRD) einlesen</button>\n  '+m):h;
+  }catch(e){return h;}
 };
 
 /* ---------- Start ---------- */

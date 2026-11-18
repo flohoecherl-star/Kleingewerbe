@@ -382,4 +382,84 @@ test('Auswertungen: Vergleich mit gleichem Zeitraum im Vorjahr',async()=>{
   assert.deepEqual(r,{lauf:150,vor:100,pj:50});
 });
 
+/* ---------- 5.6: E-Rechnung empfangen ---------- */
+const UBL=`<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+<cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0</cbc:CustomizationID>
+<cbc:ID>BW-2026-4711</cbc:ID><cbc:IssueDate>2026-11-02</cbc:IssueDate><cbc:DueDate>2026-11-16</cbc:DueDate><cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+<cac:AccountingSupplierParty><cac:Party><cac:PartyName><cbc:Name>Baywa</cbc:Name></cac:PartyName><cac:PartyTaxScheme><cbc:CompanyID>DE123456789</cbc:CompanyID></cac:PartyTaxScheme><cac:PartyLegalEntity><cbc:RegistrationName>BayWa AG</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+<cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cac:PayeeFinancialAccount><cbc:ID>DE02120300000000202051</cbc:ID></cac:PayeeFinancialAccount></cac:PaymentMeans>
+<cac:TaxTotal><cbc:TaxAmount currencyID="EUR">19.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount currencyID="EUR">100.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="EUR">19.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>19</cbc:Percent></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>
+<cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">100.00</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">100.00</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">119.00</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="EUR">119.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+<cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="H87">20</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">60.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Rindenmulch 60 l</cbc:Name></cac:Item></cac:InvoiceLine>
+<cac:InvoiceLine><cbc:ID>2</cbc:ID><cbc:InvoicedQuantity unitCode="H87">2</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">40.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Unkrautvlies</cbc:Name></cac:Item></cac:InvoiceLine>
+</Invoice>`;
+const CII=`<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100" xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100" xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+<rsm:ExchangedDocumentContext><ram:GuidelineSpecifiedDocumentContextParameter><ram:ID>urn:cen.eu:en16931:2017</ram:ID></ram:GuidelineSpecifiedDocumentContextParameter></rsm:ExchangedDocumentContext>
+<rsm:ExchangedDocument><ram:ID>R-88</ram:ID><ram:TypeCode>380</ram:TypeCode><ram:IssueDateTime><udt:DateTimeString format="102">20261105</udt:DateTimeString></ram:IssueDateTime></rsm:ExchangedDocument>
+<rsm:SupplyChainTradeTransaction>
+<ram:IncludedSupplyChainTradeLineItem><ram:SpecifiedTradeProduct><ram:Name>Kettenöl 5 l</ram:Name></ram:SpecifiedTradeProduct><ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode="H87">1</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery><ram:SpecifiedLineTradeSettlement><ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>30.00</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement></ram:IncludedSupplyChainTradeLineItem>
+<ram:IncludedSupplyChainTradeLineItem><ram:SpecifiedTradeProduct><ram:Name>Pflanzerde</ram:Name></ram:SpecifiedTradeProduct><ram:SpecifiedLineTradeSettlement><ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>20.00</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement></ram:IncludedSupplyChainTradeLineItem>
+<ram:ApplicableHeaderTradeAgreement><ram:SellerTradeParty><ram:Name>Stihl Shop Meier</ram:Name><ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">DE999999999</ram:ID></ram:SpecifiedTaxRegistration></ram:SellerTradeParty></ram:ApplicableHeaderTradeAgreement>
+<ram:ApplicableHeaderTradeSettlement><ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+<ram:ApplicableTradeTax><ram:CalculatedAmount>5.70</ram:CalculatedAmount><ram:BasisAmount>30.00</ram:BasisAmount><ram:RateApplicablePercent>19</ram:RateApplicablePercent></ram:ApplicableTradeTax>
+<ram:ApplicableTradeTax><ram:CalculatedAmount>1.40</ram:CalculatedAmount><ram:BasisAmount>20.00</ram:BasisAmount><ram:RateApplicablePercent>7</ram:RateApplicablePercent></ram:ApplicableTradeTax>
+<ram:SpecifiedTradePaymentTerms><ram:DueDateDateTime><udt:DateTimeString format="102">20261119</udt:DateTimeString></ram:DueDateDateTime></ram:SpecifiedTradePaymentTerms>
+<ram:SpecifiedTradeSettlementHeaderMonetarySummation><ram:LineTotalAmount>50.00</ram:LineTotalAmount><ram:TaxBasisTotalAmount>50.00</ram:TaxBasisTotalAmount><ram:TaxTotalAmount currencyID="EUR">7.10</ram:TaxTotalAmount><ram:GrandTotalAmount>57.10</ram:GrandTotalAmount><ram:DuePayableAmount>57.10</ram:DuePayableAmount></ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+</ram:ApplicableHeaderTradeSettlement></rsm:SupplyChainTradeTransaction></rsm:CrossIndustryInvoice>`;
+
+test('E-Rechnung: XRechnung UBL und CII werden gelesen',async()=>{
+  const r=await ev(([u,c])=>{
+    const a=erParse(u),b=erParse(c);
+    let fehler='';try{erParse('<html><body>kein</body></html>');}catch(e){fehler=e.message;}
+    return {a:[a.format,a.nr,a.datum,a.faellig,a.lieferant,a.ustId,a.iban,a.netto,a.ust,a.brutto,a.zeilen.length,a.zeilen[0].name],
+      b:[b.format,b.nr,b.datum,b.faellig,b.lieferant,b.ustId,b.brutto,b.saetze.length],
+      pb:erPreset(b,c,'r.xml'),hb:erHinweise(b),fehler};
+  },[UBL,CII]);
+  assert.deepEqual(r.a,['XRechnung (UBL)','BW-2026-4711','2026-11-02','2026-11-16','BayWa AG','DE123456789','DE02120300000000202051',100,19,119,2,'Rindenmulch 60 l']);
+  assert.deepEqual(r.b,['ZUGFeRD / Factur-X (CII)','R-88','2026-11-05','2026-11-19','Stihl Shop Meier','DE999999999',57.1,2]);
+  assert.equal(r.pb.amount,57.1);
+  assert.equal(r.pb.vat,19,'größte Steuerbasis gewinnt');
+  assert.match(r.pb.desc,/Kettenöl 5 l u\. a\. \(2 Positionen\)/);
+  assert.ok(r.hb.some(h=>/Mehrere Steuersätze/.test(h)));
+  assert.match(r.fehler,/Unbekanntes Format/);
+});
+
+test('E-Rechnung: XML-Datei einlesen, Ausgabe sichern, Original bleibt erhalten',async()=>{
+  const r=await ev(async u=>{
+    const bak=JSON.stringify(db.expenses);
+    await erEinlesen(new File([u],'baywa.xml',{type:'application/xml'}));
+    const sh=[...document.querySelectorAll('.sheet')].pop();
+    const felder={desc:sh.querySelector('#e_desc').value,amount:sh.querySelector('#e_amount').value,vendor:sh.querySelector('#e_vendor').value,
+      date:sh.querySelector('#e_date').value,vat:sh.querySelector('#e_vat').value,karte:!!sh.querySelector('#e_er')};
+    sh.querySelector('#e_save').click();
+    const e=db.expenses[db.expenses.length-1];
+    const gesp={xml:e.eRech&&e.eRech.xml===u,nr:e.eRech&&e.eRech.nr,amount:e.amount};
+    /* zweites Mal: Doppel-Hinweis */
+    await erEinlesen(new File([u],'baywa.xml',{type:'application/xml'}));
+    const doppelt=((document.getElementById('e_erh')||{}).textContent||'');
+    closeSheets();
+    db.expenses=JSON.parse(bak);
+    return {felder,gesp,doppelt};
+  },UBL);
+  assert.deepEqual(r.felder,{desc:'Rindenmulch 60 l u. a. (2 Positionen)',amount:'119',vendor:'BayWa AG',date:'2026-11-02',vat:'19',karte:true});
+  assert.deepEqual(r.gesp,{xml:true,nr:'BW-2026-4711',amount:119});
+  assert.match(r.doppelt,/schon eingelesen/);
+});
+
+test('E-Rechnung: ZUGFeRD-PDF mit komprimierter XML wird erkannt',async()=>{
+  const r=await ev(async c=>{
+    const z=new Uint8Array(await new Response(new Blob([new TextEncoder().encode(c)]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+    const kopf='%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n5 0 obj\n<< /Type /EmbeddedFile /Subtype /text#2Fxml /Filter /FlateDecode /Length '+z.length+' >>\nstream\n';
+    const fuss='\nendstream\nendobj\n6 0 obj\n<< /Type /Filespec /F (factur-x.xml) /EF << /F 5 0 R >> >>\nendobj\n%%EOF';
+    const enc=s=>Uint8Array.from(s,ch=>ch.charCodeAt(0));
+    const pdf=new Blob([enc(kopf),z,enc(fuss)]);
+    const xml=await erPdfXml(await pdf.arrayBuffer());
+    const ohne=await erPdfXml(await new Blob([enc('%PDF-1.4\n1 0 obj\n<< >>\nendobj\n%%EOF')]).arrayBuffer());
+    return {gleich:xml===c,ohne};
+  },CII);
+  assert.deepEqual(r,{gleich:true,ohne:null});
+});
+
 test('Keine JavaScript-Fehler im ganzen Testlauf',()=>{assert.deepEqual(errors,[]);});
