@@ -281,4 +281,56 @@ test('Am Mac steht die Navigation als Seitenleiste links',async()=>{
   assert.deepEqual(r,{left:'0px',w:'232px',dir:'column'});
 });
 
+/* ---------- 5.4: Angebot → Auftrag → Rechnung ---------- */
+test('Angebot wird mit einem Tipp zum Auftrag, Rechnung übernimmt die Positionen',async()=>{
+  const r=await ev(()=>{
+    const bak=JSON.stringify({c:db.customers,o:db.offers,j:db.jobs,i:db.invoices});
+    db.customers.push({id:'ac1',first:'Anna',last:'Meier',street:'Lindenweg 12',zip:'91085',city:'Weisendorf',kmRoundtrip:16});
+    db.offers.push({id:'ao1',number:'AN-900',customerId:'ac1',date:today(),dueDate:addDays(today(),30),status:'offen',klein:true,
+      positions:[{desc:'Heckenschnitt',qty:3,unit:'Std',price:45},{desc:'Grüngut aufladen und abtransportieren',qty:1,unit:'pauschal',price:40},
+        {desc:'An- und Abfahrt inkl. Verschleiß und Betriebskosten',qty:1,unit:'Pauschal',price:55}]});
+    offerToJob('ao1');
+    const job={titel:curJob.titel,preis:curJob.preis,dauer:curJob.dauer,kunde:curJob.customerId,offerId:curJob.offerId};
+    saveJob();
+    const o=db.offers.find(x=>x.id==='ao1'),j=db.jobs.find(x=>x.offerId==='ao1');
+    const verkn={jobId:o.jobId===j.id,status:o.status};
+    viewDoc('offer','ao1');
+    const knopf=(document.getElementById('o_job')||{}).textContent||'';
+    closeSheets();
+    j.status='erledigt';
+    jobZuRechnung(j.id);
+    const pos=cur.positions.map(p=>p.desc),von=cur.fromOffer,jid=cur.jobId===j.id;
+    closeSheets();
+    editJob(j.id);
+    const kette=(document.getElementById('j_kette')||{}).textContent||'';
+    closeSheets();
+    const b=JSON.parse(bak);db.customers=b.c;db.offers=b.o;db.jobs=b.j;db.invoices=b.i;cur=null;
+    return {job,verkn,knopf,pos,von,jid,kette};
+  });
+  assert.deepEqual(r.job,{titel:'Heckenschnitt',preis:230,dauer:3,kunde:'ac1',offerId:'ao1'});
+  assert.deepEqual(r.verkn,{jobId:true,status:'angenommen'});
+  assert.match(r.knopf,/Zum Auftrag/);
+  assert.deepEqual(r.pos,['Heckenschnitt','Grüngut aufladen und abtransportieren','An- und Abfahrt inkl. Verschleiß und Betriebskosten']);
+  assert.equal(r.von,'AN-900');
+  assert.equal(r.jid,true);
+  assert.match(r.kette,/Angebot/);
+  assert.match(r.kette,/✓ Erledigt/);
+  assert.doesNotMatch(r.kette,/✓ Abgerechnet/);
+});
+
+test('Auftrag mit Rechnungsentwurf öffnet den Entwurf statt einen zweiten anzulegen',async()=>{
+  const r=await ev(()=>{
+    const bak=JSON.stringify({j:db.jobs,i:db.invoices});
+    db.jobs.push({id:'aj2',customerId:'',titel:'Rasen',date:today(),status:'erledigt',preis:80});
+    db.invoices.push({id:'ai2',number:'RE-Entwurf',draft:true,jobId:'aj2',date:today(),dueDate:today(),positions:[{desc:'Rasen',qty:1,price:80}],payments:[]});
+    const vorher=db.invoices.length;
+    jobZuRechnung('aj2');
+    const res={gleich:db.invoices.length===vorher,offen:cur&&cur.id};
+    closeSheets();
+    const b=JSON.parse(bak);db.jobs=b.j;db.invoices=b.i;cur=null;
+    return res;
+  });
+  assert.deepEqual(r,{gleich:true,offen:'ai2'});
+});
+
 test('Keine JavaScript-Fehler im ganzen Testlauf',()=>{assert.deepEqual(errors,[]);});
