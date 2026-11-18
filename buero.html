@@ -7950,7 +7950,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.4.0';
+const APP_VERSION5='5.5.0';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -10982,6 +10982,132 @@ drawJob=function(){
     }
   }catch(e){console.warn(e);}
   return r;
+};
+
+/* =====================================================================
+   VERSION 5.5 — Auswertungen
+   Umsatz nach Kunde und Leistung, Vergleich mit Vorjahr und Vormonat,
+   und drei Zahlen sauber getrennt: Deckungsbeitrag, Kassenüberschuss,
+   steuerlicher Gewinn (EÜR).
+   Umsatz = netto aus festgeschriebenen Rechnungen nach Leistungsdatum,
+   ohne Stornos; in eine Schlussrechnung verrechnete Abschläge zählen
+   nicht doppelt (die Schlussrechnung enthält den vollen Wert).
+   ===================================================================== */
+const AW_ICO='M4 20V11M10 20V5M16 20v-6M2 20h20';
+function awRechnungen(von,bis){
+  return db.invoices.filter(i=>!i.draft&&!i.stornoVon&&!i.storniertDurch
+    &&!(i.art==='abschlag'&&i.verrechnetIn)&&hDate(i).slice(0,10)>=von&&hDate(i).slice(0,10)<=bis);
+}
+const awUmsatz=(von,bis)=>+sum(awRechnungen(von,bis),i=>totals(i).net).toFixed(2);
+function awNachKunde(y){
+  const m=new Map();
+  awRechnungen(y+'-01-01',y+'-12-31').forEach(i=>{
+    const k=i.customerId||'-',r=m.get(k)||{c:cust(i.customerId),umsatz:0,n:0};
+    r.umsatz+=totals(i).net;r.n++;m.set(k,r);});
+  return [...m.values()].sort((a,b)=>b.umsatz-a.umsatz);
+}
+/* Positionen zusammenfassen: Katalogleistung, sonst die ersten Wörter */
+function awLeistungKey(desc){
+  const d=String(desc||'').trim();if(!d)return 'Ohne Beschreibung';
+  if(istAnfahrt({desc:d}))return 'An- und Abfahrt';
+  const lo=d.toLowerCase();
+  const it=(db.items||[]).filter(x=>x.name&&lo.startsWith(String(x.name).toLowerCase())).sort((a,b)=>b.name.length-a.name.length)[0];
+  if(it)return it.name;
+  const w=d.split('\n')[0].replace(/[,:;(].*$/,'').trim().split(/\s+/).slice(0,3).join(' ');
+  return w.charAt(0).toUpperCase()+w.slice(1);
+}
+function awNachLeistung(y){
+  const m=new Map();
+  awRechnungen(y+'-01-01',y+'-12-31').forEach(i=>(i.positions||[]).forEach(p=>{
+    const k=awLeistungKey(p.desc),r=m.get(k)||{name:k,umsatz:0,menge:0,einheit:p.unit||'',n:0};
+    r.umsatz+=(+p.qty||0)*(+p.price||0);r.menge+=+p.qty||0;r.n++;
+    if((r.einheit||'')!==(p.unit||''))r.einheit='';
+    m.set(k,r);}));
+  return [...m.values()].filter(r=>Math.abs(r.umsatz)>0.004).sort((a,b)=>b.umsatz-a.umsatz);
+}
+const awPct=(a,b)=>b>0?Math.round((a-b)/b*100):null;
+function awVergleich(y){
+  const t=today(),cy=+t.slice(0,4),bis=y===cy?t.slice(5,10):'12-31';
+  const lauf=awUmsatz(y+'-01-01',y+'-'+bis),vor=awUmsatz((y-1)+'-01-01',(y-1)+'-'+(bis==='02-29'?'02-28':bis));
+  const mm=y===cy?+t.slice(5,7):12;
+  const mStr=(yy,m)=>yy+'-'+String(m).padStart(2,'0');
+  const mU=(yy,m)=>awUmsatz(mStr(yy,m)+'-01',mStr(yy,m)+'-31');
+  const vmY=mm===1?y-1:y,vmM=mm===1?12:mm-1;
+  return {bis,lauf,vor,pj:awPct(lauf,vor),
+    monat:MONTHS[mm-1],mu:mU(y,mm),vm:mU(vmY,vmM),vmName:MONTHS[vmM-1],vjm:mU(y-1,mm),
+    pm:awPct(mU(y,mm),mU(vmY,vmM)),pjm:awPct(mU(y,mm),mU(y-1,mm))};
+}
+function awDreiZahlen(y){
+  const umsatz=awUmsatz(y+'-01-01',y+'-12-31');
+  const kk=typeof kundenKalk==='function'?kundenKalk(y):[];
+  const direkt=sum(kk,r=>r.kosten);
+  const zufluss=incomeIn(y,null),abfluss=sum(expList(y,null,true),e=>+e.amount||0);
+  return {umsatz,direkt,deckung:umsatz-direkt,zufluss,abfluss,kasse:zufluss-abfluss,gewinn:profitYear(y)};
+}
+let awYear=new Date().getFullYear(),awEl=null;
+function openAusw(y){awYear=+y||new Date().getFullYear();awEl=sheet('Auswertungen','<div id="awbody"></div>');drawAusw();}
+const setAwYear=v=>{awYear=+v;drawAusw();};
+function drawAusw(){
+  if(!awEl||!awEl.querySelector('#awbody'))return;
+  const y=awYear,cy=new Date().getFullYear();
+  const yrs=[...new Set([cy,...yearsOf(db.invoices).map(Number)])].sort((a,b)=>b-a);
+  const v=awVergleich(y),z=awDreiZahlen(y),ku=awNachKunde(y),le=awNachLeistung(y);
+  const ges=sum(ku,r=>r.umsatz)||1;
+  const pctTag=p=>p==null?'<span class="hint">kein Vergleich</span>':`<b style="color:${p>=0?'var(--moss)':'var(--red)'}">${p>=0?'+':'−'} ${Math.abs(p)} %</b>`;
+  const bar=(w)=>`<div class="v5bar" style="margin:6px 0 2px"><i style="width:${Math.max(1,Math.min(100,w)).toFixed(1)}%"></i></div>`;
+  const top=ku[0],anteil=top?top.umsatz/ges*100:0;
+  const bisTxt=y===cy?' bis '+dDE(y+'-'+v.bis).slice(0,6):'';
+  awEl.querySelector('#awbody').innerHTML=`
+  <div class="card">
+    <div class="row between"><span class="lbl">Umsatz ${y}${bisTxt}</span>
+      <select id="aw_y" style="width:auto;padding:5px 8px;font-size:13px" onchange="setAwYear(this.value)">${yrs.map(x=>`<option ${x===y?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="big mono">${eur(v.lauf)}</div>
+    <div class="kv"><span>Gleicher Zeitraum ${y-1}</span><span class="mono" style="white-space:nowrap">${eur(v.vor)} · ${pctTag(v.pj)}</span></div>
+    <div class="kv"><span>${v.monat} ${y}</span><span class="mono">${eur(v.mu)}</span></div>
+    <div class="kv"><span>zum ${v.vmName}</span><span class="mono" style="white-space:nowrap">${eur(v.vm)} · ${pctTag(v.pm)}</span></div>
+    <div class="kv" style="border-bottom:0"><span>zum ${v.monat} ${y-1}</span><span class="mono" style="white-space:nowrap">${eur(v.vjm)} · ${pctTag(v.pjm)}</span></div>
+    <div class="hint" style="margin-top:6px">Netto, nach Leistungsdatum, ohne Entwürfe und Stornos. Bei Gartenarbeit schwankt der Monat stark mit der Saison, deshalb ist der Vergleich mit dem Vorjahresmonat aussagekräftiger als der mit dem Vormonat.</div>
+  </div>
+
+  <div class="card" id="aw_drei">
+    <div class="lbl">Drei Zahlen, drei Fragen</div>
+    <div class="kv" style="margin-top:6px"><span><b>Deckungsbeitrag</b><br><span class="hint">Was bleibt von den Aufträgen nach Material und Fahrten, die du Kunden zugeordnet hast?</span></span><b class="mono" style="white-space:nowrap;margin-left:10px">${eur(z.deckung)}</b></div>
+    <div class="kv"><span><b>Kassenüberschuss</b><br><span class="hint">Geld eingegangen ${eur(z.zufluss)} minus Geld ausgegeben ${eur(z.abfluss)}, Anschaffungen voll.</span></span><b class="mono" style="white-space:nowrap;margin-left:10px">${eur(z.kasse)}</b></div>
+    <div class="kv" style="border-bottom:0"><span><b>Gewinn laut EÜR</b><br><span class="hint">Was das Finanzamt sieht: Zufluss minus Betriebsausgaben, Anschaffungen nur über die Abschreibung, dazu IAB und Arbeitszimmer.</span></span><b class="mono" style="white-space:nowrap;margin-left:10px;color:${z.gewinn>=0?'var(--moss)':'var(--red)'}">${eur(z.gewinn)}</b></div>
+    <div class="hint" style="margin-top:6px">Die Zahlen weichen voneinander ab, weil sie verschiedenes messen: Umsatz zählt nach Leistungsdatum, die EÜR nach dem Tag, an dem das Geld kam oder ging. Eine Rechnung vom Dezember, die im Januar bezahlt wird, ist Umsatz im alten und Gewinn im neuen Jahr. Für die Steuer gilt nur die EÜR, und die prüft am Ende dein Steuerberater.</div>
+  </div>
+
+  <div class="card" id="aw_kunden">
+    <div class="row between"><span class="lbl">Umsatz nach Kunde</span><span class="hint">${ku.length} Kunden</span></div>
+    ${ku.length?ku.slice(0,10).map(r=>`<div style="margin-top:10px">
+      <div class="row between"><span>${r.c&&r.c.id?`<a href="#" onclick="event.preventDefault();openCustomer('${r.c.id}')" style="color:inherit;font-weight:600">${esc(custName(r.c))}</a>`:'<b>Ohne Kunde</b>'}</span><b class="mono">${eur(r.umsatz)}</b></div>
+      ${bar(r.umsatz/ges*100)}<div class="hint">${Math.round(r.umsatz/ges*100)} % · ${r.n} Rechnung${r.n>1?'en':''} · Ø ${eur(r.umsatz/r.n)}</div></div>`).join('')
+      +(ku.length>10?`<div class="hint" style="margin-top:8px">Weitere ${ku.length-10} Kunden zusammen ${eur(sum(ku.slice(10),r=>r.umsatz))}.</div>`:'')
+      :'<div class="empty">Noch keine festgeschriebenen Rechnungen in diesem Jahr.</div>'}
+    ${anteil>=30&&ku.length>1?`<div class="warn" style="margin-top:10px">${esc(custName(top.c))} bringt ${Math.round(anteil)} % deines Umsatzes. Fällt dieser Kunde weg, fehlt ein großer Teil. Das ist kein Fehler, aber ein Risiko, das du kennen solltest.</div>`:''}
+  </div>
+
+  <div class="card" id="aw_leist">
+    <div class="row between"><span class="lbl">Umsatz nach Leistung</span><span class="hint">netto</span></div>
+    ${le.length?le.slice(0,12).map(r=>`<div style="margin-top:10px">
+      <div class="row between"><span style="font-weight:600">${esc(r.name)}</span><b class="mono">${eur(r.umsatz)}</b></div>
+      ${bar(r.umsatz/ges*100)}<div class="hint">${Math.round(r.umsatz/ges*100)} % · ${r.n}× berechnet${r.einheit&&r.menge?` · ${nf.format(r.menge)} ${esc(r.einheit)}`:''}</div></div>`).join('')
+      :'<div class="empty">Noch keine Positionen.</div>'}
+    <div class="hint" style="margin-top:10px">Positionen werden über den Namen im Leistungskatalog zusammengefasst, sonst über die ersten Wörter. Je öfter du Leistungen aus dem Katalog nimmst, desto genauer wird diese Liste.</div>
+  </div>
+  <button class="btn full" onclick="openKalk()">Nachkalkulation je Kunde ›</button>`;
+}
+/* Eintrag in Geld › Abgleichen & planen */
+const _vGeld55=vGeld;
+vGeld=function(){
+  const h=_vGeld55.apply(this,arguments);
+  try{
+    const row=`<button class="it" onclick="openAusw(yGeld)"><span class="ico acc">${icoSvg(AW_ICO)}</span><div style="min-width:0"><div class="nm">Auswertungen</div><div class="mt">Umsatz nach Kunde und Leistung, Vergleich zum Vorjahr</div></div><span class="r"><span class="v5car">›</span></span></button>`;
+    const k=h.indexOf('<div class="mgrp">Abgleichen');
+    if(k<0)return h;
+    const l=h.indexOf('<div class="v5list">',k);
+    return l<0?h:h.slice(0,l+20)+'\n    '+row+h.slice(l+20);
+  }catch(e){console.warn(e);return h;}
 };
 
 /* ---------- Start ---------- */
