@@ -1534,6 +1534,8 @@ function totals(d){
   return {net,vat,gross:net+vat};
 }
 function paid(d){return sum(d.payments||[],p=>+p.amount||0);}
+/* Ein einziger Zahlungssatz statt Zahlungsziel + Fälligkeit + Hinweis getrennt (seit 5.1.2) */
+const zahlSatz=d=>'Bitte überweisen Sie den Rechnungsbetrag ohne Abzüge bis zum '+dDE(d.dueDate)+' unter Angabe der Rechnungsnummer auf das unten angegebene Konto.';
 /* Abschlag / Schlussrechnung: Auf der Schlussrechnung steht der volle Auftragswert,
    fällig ist er abzüglich der schon berechneten Abschläge. */
 const abzuegeSum=d=>sum(d.abzuege||[],a=>+a.gross||0);
@@ -1739,29 +1741,14 @@ const TABS=[
  ['more','Mehr','M4 6h16M4 12h16M4 18h16']
 ];
 let tab='start';
-function drawTabs(){document.getElementById('tabs').innerHTML=TABS.map(t=>{const b=tabBadge(t[0]);
- return `<button class="${tab===t[0]||(t[0]==='inv'&&tab==='off')?'on':''}" onclick="go('${t[0]}')" aria-label="${t[1]}"><svg viewBox="0 0 24 24"><path d="${t[2]}"/></svg>${b?`<span class="bdg">${b>9?'9+':b}</span>`:''}${t[1]}</button>`;}).join('');}
+/* drawTabs: alte Fassung entfernt, gültig ist die spätere Deklaration */
 const scrollPos={};
 function go(t){buzz(6);if(t===tab){window.scrollTo({top:0,behavior:'smooth'});render();return;}
   scrollPos[tab]=window.scrollY;tab=t;drawTabs();render(true);window.scrollTo(0,scrollPos[t]||0);}
-function fabAction(){({start:()=>editDoc('invoice'),jobs:()=>editJob(),inv:()=>editDoc('invoice'),off:()=>editDoc('offer'),exp:()=>editExpense(),fahrten:()=>editFahrt(),more:()=>editCustomer()})[tab]();}
+/* fabAction: alte Fassung entfernt, gültig ist die spätere Deklaration */
 
 let lastTab=null;
-function render(tabChanged){
-  const v=document.getElementById('view');
-  const offen=(!tabChanged&&lastTab===tab)?[...v.querySelectorAll('details[data-k]')].map(d=>[d.dataset.k,d.open]):[];
-  const y0=window.scrollY;
-  document.getElementById('htitle').textContent=({start:'Start',jobs:'Aufträge',inv:'Rechnungen',off:'Angebote',exp:'Ausgaben',fahrten:'Fahrtenbuch',more:'Mehr'})[tab];
-  document.getElementById('hsub').textContent=db.settings.company.name+' · Büro';
-  document.getElementById('fab').style.display=tab==='more'?'none':'grid';
-  v.classList.toggle('anim',!!tabChanged);
-  v.innerHTML=({start:vStart,jobs:vJobs,inv:vInvoices,off:vOffers,exp:vExpenses,fahrten:vFahrten,more:vMore})[tab]();
-  offen.forEach(([k,o])=>{const d=v.querySelector(`details[data-k="${k}"]`);if(d)d.open=o;});
-  if(offen.length)window.scrollTo(0,y0);
-  lastTab=tab;
-  drawTabs();
-  refreshOpenViews();
-}
+/* render: alte Fassung entfernt, gültig ist die spätere Deklaration */
 
 /* ===================== Start / Statistik ===================== */
 let statYear=new Date().getFullYear();
@@ -2756,31 +2743,7 @@ function jobReopen(id){
   j.status='geplant';delete j.erledigtAm;save();closeSheets();render();toast('Wieder offen');
 }
 /* Abschließen: Status setzen und Fahrt ins Fahrtenbuch schreiben */
-function jobDone(id){
-  const j=db.jobs.find(x=>x.id===id);if(!j)return;
-  if(timerRun()&&timerRun().jobId===id)timerStop();
-  const c=j.customerId?cust(j.customerId):null,hat=!!(c&&c.id);
-  const fb=db.settings.fahrtenbuch||{};
-  const km=j.fahrt!==false?(+j.fahrtKm||(hat?+c.kmRoundtrip||0:0)):0;
-  const ekm=j.ents?(+j.entsKm||+fb.deponieKm||0):0;
-  const teile=[];
-  if(j.fahrt!==false)teile.push(km?`Fahrt über ${nf.format(km)} km`:'Fahrt ohne km (im Fahrtenbuch ergänzbar)');
-  if(j.ents)teile.push(`Entsorgungsfahrt über ${nf.format(ekm)} km`);
-  const txt=teile.length?`Ins Fahrtenbuch kommt am ${dDE(j.date)}:\n· ${teile.join('\n· ')}`:'Es wird keine Fahrt eingetragen.';
-  /* Gibt es für Kunde und Tag schon eine Fahrt (z. B. aus der Rechnung)? Dann nicht doppelt zählen. */
-  const dop=j.fahrt!==false&&!j.fahrtId&&j.customerId
-    &&db.fahrten.some(f=>f.customerId===j.customerId&&f.date===j.date&&!isDepFahrt(f));
-  if(!confirm(`Auftrag als erledigt abschließen?\n\n${txt}`))return;
-  if(dop&&!confirm('Für diesen Kunden steht an dem Tag bereits eine Fahrt im Fahrtenbuch.\n\nTrotzdem eine zweite eintragen?')){
-    j.status='erledigt';j.erledigtAm=today();
-    save();closeSheets();render();toast('Erledigt · keine zusätzliche Fahrt');return;
-  }
-  j.status='erledigt';j.erledigtAm=today();
-  const n=jobFahrtenSchreiben(j);
-  save();closeSheets();render();
-  celebrate('Auftrag erledigt');
-  setTimeout(()=>toast(n?`Erledigt · ${n===1?'Fahrt':n+' Fahrten'} eingetragen`:'Erledigt'),900);
-}
+/* jobDone: alte Fassung entfernt, gültig ist die spätere Deklaration */
 
 /* ===================== Kalender ===================== */
 let calY=null,calM=null,calEl=null;
@@ -2856,18 +2819,8 @@ function openCalDay(ds){
 let yMore=new Date().getFullYear();
 const setYMore=v=>{yMore=+v;render();};
 /* vMore() steht im Version-3-Teil weiter unten */
-function numberGaps(){
-  const p=db.settings.numbers.invPrefix,y=new Date().getFullYear();
-  const ns=[...new Set(db.invoices.filter(i=>!i.draft&&i.number.startsWith(p)&&+i.date.slice(0,4)>=y-1)
-    .map(i=>+i.number.slice(p.length)).filter(n=>!isNaN(n)))].sort((a,b)=>a-b);
-  const g=[];
-  for(let i=1;i<ns.length&&g.length<12;i++)for(let k=ns[i-1]+1;k<ns[i]&&g.length<12;k++)g.push(p+k);
-  return g;
-}
-function numberDupes(){
-  const c={};db.invoices.forEach(i=>{if(!i.draft)c[i.number]=(c[i.number]||0)+1;});
-  return Object.keys(c).filter(k=>c[k]>1);
-}
+/* numberGaps: alte Fassung entfernt, gültig ist die spätere Deklaration */
+/* numberDupes: alte Fassung entfernt, gültig ist die spätere Deklaration */
 
 /* ===================== Sheets ===================== */
 function sheet(title,html){
@@ -4162,10 +4115,8 @@ async function genPdf(type,id,kind){
     : isMahn
     ? ['Bitte überweisen Sie den offenen Betrag von '+money(openAmt)+' unter Angabe der Rechnungsnummer '+d.number+' auf das unten angegebene Konto.',
        'Zahlungsziel: '+dDE(addDays(today(),10))+'.']
-    : ['Zahlungsbedingungen: Zahlung innerhalb von '+db.settings.defaults.paymentDays+' Tagen ab Rechnungseingang ohne Abzüge.','',
-       'Bitte überweisen Sie den Rechnungsbetrag unter Angabe der Rechnungsnummer auf das unten angegebene Konto.',
-       'Der Rechnungsbetrag ist bis zum '+dDE(d.dueDate)+' fällig.'];
-  if(isInv&&!isMahn&&!d.stornoVon&&verzugHinweisFuer(d))payLines.push('',VERZUG_HINWEIS);
+    : [zahlSatz(d)];
+  if(isInv&&!isMahn&&!d.stornoVon&&verzugHinweisFuer(d))payLines.push(VERZUG_HINWEIS);
   if(d.note)payLines.push('',...doc.splitTextToSize(d.note,W-60));
   doc.setFont('helvetica','normal');doc.setFontSize(9.3);doc.setTextColor(20);
   const textMaxW=isInv&&co.iban?W-36:W;
@@ -4255,9 +4206,7 @@ function docHTML(d,type,kind){
   <div class="pay">
     ${isInv&&kind!=='Rechnung'?`<p>Bitte überweisen Sie den offenen Betrag von ${nf.format(openAmt)} EUR unter Angabe der Rechnungsnummer ${esc(d.number)} auf das unten angegebene Konto.<br>
     Zahlungsziel: ${dDE(addDays(today(),10))}.</p>`
-    :isInv?`<p>Zahlungsbedingungen: Zahlung innerhalb von ${db.settings.defaults.paymentDays} Tagen ab Rechnungseingang ohne Abzüge.</p>
-    <p>Bitte überweisen Sie den Rechnungsbetrag unter Angabe der Rechnungsnummer auf das unten angegebene Konto.<br>
-    Der Rechnungsbetrag ist bis zum ${dDE(d.dueDate)} fällig.</p>${!d.stornoVon&&verzugHinweisFuer(d)?`<p>${VERZUG_HINWEIS}</p>`:''}`
+    :isInv?`<p>${esc(zahlSatz(d))}${!d.stornoVon&&verzugHinweisFuer(d)?`<br>${VERZUG_HINWEIS}`:''}</p>`
     :`<p>Dieses Angebot ist gültig bis zum ${dDE(d.dueDate)}. Über Ihren Auftrag freue ich mich.</p>`}
     ${d.note?`<p>${nl2br(d.note)}</p>`:''}
     <p style="margin-top:8mm">Mit freundlichen Grüßen<br>${esc(co.owner)}</p>
@@ -6365,19 +6314,7 @@ function mergeRemote(rem){
   return changed;
 }
 /* Nummernkreise geräteübergreifend hochziehen: der höchste Stand gewinnt */
-function healCounters(rem){
-  const n=db.settings.numbers;
-  const rn=(rem.data&&rem.data.settings&&rem.data.settings.numbers)||{};
-  ['invNext','offNext','custNext'].forEach(k=>n[k]=Math.max(+n[k]||0,+rn[k]||0));
-  /* Entwürfe tragen nur eine Vorschau-Nummer — die darf den Zähler nicht
-     hochtreiben, sonst reißt beim Festschreiben eine Lücke. */
-  const hoechste=(arr,pre)=>arr.reduce((m,d)=>{
-    if(d.draft)return m;
-    const v=parseInt(String(d.number||'').replace(pre,'').replace(/\D/g,''),10)||0;return v>m?v:m;},0);
-  n.invNext=Math.max(n.invNext,hoechste(db.invoices||[],n.invPrefix)+1);
-  n.offNext=Math.max(n.offNext,hoechste(db.offers||[],n.offPrefix)+1);
-  n.custNext=Math.max(n.custNext,(db.customers||[]).reduce((m,c)=>Math.max(m,+c.number||0),0)+1);
-}
+/* healCounters: alte Fassung entfernt, gültig ist die spätere Deklaration */
 
 /* ---------- GitHub-Ablage ---------- */
 const b64enc=str=>{const u=new TextEncoder().encode(str);let b='';const CH=0x8000;
@@ -7222,18 +7159,7 @@ function custLast(cid){
   return d.length?d[d.length-1]:'';
 }
 let custSort=ui.custSort||'name',custFilter='alle';
-function openCustomers(){
-  const el=sheet(`Kunden`,'<div id="custbody" data-nodirty></div>');
-  el.querySelector('#custbody').innerHTML=`
-    <div class="searchbar">${IC('M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4')}<input id="custq" placeholder="Name, Ort, Telefon, Nummer" autocomplete="off"></div>
-    <div id="custchips"></div><div id="custlist"></div>
-    <button class="btn pri full" style="margin-top:4px" onclick="editCustomer(null,id=>{redrawCustomers();openCustomer(id)})">Kunde anlegen</button>
-    <div class="grid2" style="margin-top:8px"><button class="btn" onclick="kmAlleKunden()">Strecken berechnen</button><button class="btn" onclick="exportKunden()">Liste als CSV</button></div>
-    <div class="hint" style="margin-top:6px">Holt für alle Kunden ohne hinterlegte Strecke die Entfernung ab ${esc(adrText(db.settings.company))} hin und zurück. Braucht Internet, von Hand gesetzte Werte bleiben unangetastet.</div>`;
-  el.querySelector('#custq').oninput=redrawCustomers;
-  redrawCustomers();
-  setTimeout(()=>{if(window.innerWidth>700)el.querySelector('#custq').focus();},50);
-}
+/* openCustomers: alte Fassung entfernt, gültig ist die spätere Deklaration */
 function redrawCustomers(){
   const box=document.getElementById('custlist');if(!box)return;
   const q=(document.getElementById('custq')||{}).value||'',s=q.toLowerCase().trim();
@@ -7428,11 +7354,7 @@ function openPrefs(){
 /* =====================================================================
    Tab-Leiste mit Zählern
    ===================================================================== */
-function tabBadge(k){
-  if(k==='inv'){const n=db.invoices.filter(i=>statusOf(i)==='faellig').length;return n;}
-  if(k==='jobs'){const t=today();return db.jobs.filter(j=>jStat(j)==='geplant'&&j.date<=t).length;}
-  return 0;
-}
+/* tabBadge: alte Fassung entfernt, gültig ist die spätere Deklaration */
 function exportKunden(){
   const rows=[['Nr','Anrede','Vorname','Nachname','Firma','Straße','PLZ','Ort','Telefon','E-Mail','Umsatz gesamt','Offen','Letzte Leistung','Notiz']];
   [...db.customers].sort((a,b)=>sortName(a)<sortName(b)?-1:1).forEach(c=>rows.push([c.number,c.anrede,c.first,c.last,c.company,c.street,c.zip,c.city,c.phone,c.email,
@@ -7954,7 +7876,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.1.1';
+const APP_VERSION5='5.1.2';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -9783,12 +9705,7 @@ function numberDupes(){
   const c={};db.invoices.forEach(i=>{if(!i.draft&&!i.storniertDurch)c[i.number]=(c[i.number]||0)+1;});
   return Object.keys(c).filter(k=>c[k]>1);
 }
-function nrFrei(){
-  const nk=db.settings.numbers,p=nk.invPrefix;
-  const mx=Math.max(0,...db.invoices.map(i=>String(i.number||'')).filter(n=>n.startsWith(p)).map(n=>+n.slice(p.length)).filter(n=>!isNaN(n)));
-  if(+nk.invNext<=mx)nk.invNext=mx+1;
-  return p+nk.invNext;
-}
+/* nrFrei: alte Fassung entfernt, gültig ist die spätere Deklaration */
 function dupFix(){
   const el=sheet('Doppelte Rechnungsnummern','<div id="dfb"></div>');el.dataset.nodirty='1';
   const draw=()=>{
@@ -9969,7 +9886,7 @@ v5Init=function(){
    5. Wochenabschluss.
    ===================================================================== */
 const KU_HINWEIS='Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Steuerbefreiung für Kleinunternehmer).';
-const VERZUG_HINWEIS='Hinweis nach § 286 Abs. 3 BGB: Sie kommen ohne weitere Mahnung in Verzug, wenn Sie nicht innerhalb von 30 Tagen nach Fälligkeit und Zugang dieser Rechnung zahlen.';
+const VERZUG_HINWEIS='Ohne Zahlung kommen Sie 30 Tage nach Fälligkeit und Zugang in Verzug (§ 286 Abs. 3 BGB).';
 function verzugHinweisFuer(d){
   if(db.settings.verzugHinweis===false)return false;
   try{return isPrivat(cust(d.customerId));}catch(e){return false;}
