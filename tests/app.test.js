@@ -462,4 +462,25 @@ test('E-Rechnung: ZUGFeRD-PDF mit komprimierter XML wird erkannt',async()=>{
   assert.deepEqual(r,{gleich:true,ohne:null});
 });
 
+/* ---------- 5.7: Layout wie Vorschau ---------- */
+test('Heute: Kennzahlen-Band, kompakter Einsatz, Braucht dich; Rechnungen: Summenband und Status',async()=>{
+  const r=await ev(()=>{
+    const bak=JSON.stringify({c:db.customers,i:db.invoices,j:db.jobs});const t=today();
+    db.customers.push({id:'l1',name:'Schmidt',first:'Karl',last:'Schmidt'});
+    db.invoices.push({id:'l2',number:'RE-L2',customerId:'l1',date:addDays(t,-20),dueDate:addDays(t,-6),klein:true,positions:[{desc:'Heckenschnitt',qty:1,price:220}],payments:[]});
+    db.jobs.push({id:'l3',customerId:'l1',titel:'Laub',date:t,time:'09:00',status:'geplant',preis:90,werkzeug:[],material:[],fotos:[]});
+    const h=vHeute();fInv='alle';yInv='alle';const re=vInvoices();
+    const b=JSON.parse(bak);db.customers=b.c;db.invoices=b.i;db.jobs=b.j;
+    const d=document.createElement('div');d.innerHTML=h;const e=document.createElement('div');e.innerHTML=re;
+    return {band:!!d.querySelector('.kzband .kz'),einsatz:(d.querySelector('#n57 .bt')||{}).textContent||'',
+      reihe:h.indexOf('n57')<h.indexOf('Braucht dich')&&h.indexOf('Braucht dich')<h.indexOf('class="wp"'),
+      reband:(e.querySelector('#reband')||{}).textContent||'',karte:[...e.querySelectorAll('.rec')].map(x=>x.textContent.replace(/\s+/g,' ').trim()).find(x=>x.includes('RE-L2'))||''};
+  });
+  assert.ok(r.band);
+  assert.match(r.einsatz,/Losfahren/);assert.match(r.einsatz,/Route/);
+  assert.ok(r.reihe,'Einsatz, dann Braucht dich, dann Wochenplan');
+  assert.match(r.reband,/Überfällig/);
+  assert.match(r.karte,/Schmidt/);assert.match(r.karte,/220,00 €/);assert.match(r.karte,/Überfällig/);
+});
+
 test('Keine JavaScript-Fehler im ganzen Testlauf',()=>{assert.deepEqual(errors,[]);});
