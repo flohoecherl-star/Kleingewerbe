@@ -7950,7 +7950,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.3.0';
+const APP_VERSION5='5.4.0';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -10849,6 +10849,140 @@ applyTheme=function(m){_applyTheme53.apply(this,arguments);
   const mc=document.querySelector('meta[name="theme-color"]');if(mc)mc.content=eff==='light'?'#1F3D2B':'#16271D';
   const sb=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');if(sb)sb.content='black-translucent';};
 try{matchMedia('(min-width:1024px)').addEventListener('change',()=>drawTabs());}catch(e){}
+
+/* =====================================================================
+   VERSION 5.4 — Angebot → Auftrag → Rechnung
+   Ein angenommenes Angebot wird mit einem Tipp zum Auftrag; die Rechnung
+   aus dem Auftrag übernimmt dann die Positionen des Angebots.
+   Status-Kette: Angebot · Geplant · Erledigt · Abgerechnet · Bezahlt
+   (abgeleitet aus vorhandenen Daten, keine Datenumstellung).
+   ===================================================================== */
+const APP_VERSION54='5.4.0';
+const jobRe=j=>j?db.invoices.filter(i=>i.jobId===j.id&&!i.stornoVon&&!i.storniertDurch).pop()||null:null;
+const offJob=o=>o&&o.jobId?db.jobs.find(j=>j.id===o.jobId)||null:null;
+function jobKette(j){
+  const o=j.offerId?db.offers.find(x=>x.id===j.offerId):null,r=jobRe(j),st=jStat(j);
+  const s=[];
+  if(o)s.push(['Angebot',true]);
+  s.push(['Geplant',true]);
+  if(st==='abgesagt'){s.push(['Abgesagt',true,'red']);return s;}
+  s.push(['Erledigt',st==='erledigt']);
+  s.push(['Abgerechnet',!!(r&&!r.draft)]);
+  s.push(['Bezahlt',!!(r&&!r.draft&&statusOf(r)==='bezahlt')]);
+  return s;
+}
+function ketteHtml(s){
+  return `<div class="kette" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${s.map(([n,ok,f])=>
+    `<span style="font-size:12px;font-weight:700;border-radius:6px;padding:3px 8px;${f==='red'?'background:var(--red);color:#fff':ok?'background:var(--accent);color:var(--bg)':'background:var(--line);color:var(--dim)'}">${ok&&f!=='red'?'✓ ':''}${n}</span>`).join('')}</div>`;
+}
+/* Stunden aus Angebotspositionen als geplante Dauer */
+function offStunden(o){
+  return sum((o.positions||[]).filter(p=>/^(std|h|stunde)/i.test(p.unit||'')),p=>+p.qty||0);
+}
+function offerToJob(id){
+  const o=db.offers.find(x=>x.id===id);if(!o)return;
+  const vorh=offJob(o);
+  if(vorh){closeSheets();editJob(vorh.id);return;}
+  presetCust=o.customerId||null;
+  try{editJob(null,o.deliveryDate&&o.deliveryDate>today()?o.deliveryDate:today());}finally{presetCust=null;}
+  if(!curJob)return;
+  const work=(o.positions||[]).filter(p=>!istAnfahrt(p));
+  curJob.titel=(work[0]&&work[0].desc||o.subject||'Gartenarbeiten').split('\n')[0].slice(0,80);
+  curJob.preis=+totals(o).net.toFixed(2);
+  const h=offStunden(o);if(h>0)curJob.dauer=h;
+  curJob.offerId=o.id;
+  curJob.notiz=(curJob.notiz?curJob.notiz+'\n':'')+'Aus Angebot '+o.number+': '+work.map(p=>p.desc).join(', ');
+  const c=curJob.customerId?cust(curJob.customerId):null;
+  if(c&&c.id&&!(+curJob.fahrtKm>0))curJob.fahrtKm=+c.kmRoundtrip||0;
+  drawJob();
+  toast('Termin wählen und sichern');
+}
+/* Beim Sichern das Angebot verknüpfen und als angenommen markieren */
+const _saveJob54=saveJob;
+saveJob=function(){
+  const id=curJob&&curJob.id,oid=curJob&&curJob.offerId;
+  const r=_saveJob54.apply(this,arguments);
+  try{
+    if(oid&&db.jobs.some(j=>j.id===id)){
+      const o=db.offers.find(x=>x.id===oid);
+      if(o&&o.jobId!==id){o.jobId=id;if((o.status||'offen')==='offen')o.status='angenommen';saveQuiet();render();}
+    }
+  }catch(e){console.warn(e);}
+  return r;
+};
+/* Rechnung aus dem Auftrag: Positionen des Angebots übernehmen */
+const _jobZuRechnung54=jobZuRechnung;
+jobZuRechnung=function(id){
+  const j=db.jobs.find(x=>x.id===id);if(!j)return;
+  const alt=jobRe(j);
+  if(alt){
+    if(alt.draft){editDoc('invoice',alt.id);toast('Rechnungsentwurf zu diesem Auftrag gibt es schon');return;}
+    if(!confirm(`Zu diesem Auftrag gibt es schon Rechnung ${alt.number}. Trotzdem eine weitere schreiben?`))return;
+  }
+  const r=_jobZuRechnung54.apply(this,arguments);
+  try{
+    const o=j.offerId&&db.offers.find(x=>x.id===j.offerId);
+    if(o&&cur&&cur.jobId===j.id&&(o.positions||[]).length){
+      const op=structuredClone(o.positions).map(p=>{delete p._auto;return p;});
+      const hatAnf=op.some(istAnfahrt);
+      const auto=(cur.positions||[]).filter(p=>p._auto&&!(hatAnf&&istAnfahrt(p)));
+      cur.positions=[...op.filter(p=>!istAnfahrt(p)),...op.filter(istAnfahrt),...auto];
+      cur.fromOffer=o.number;
+      if(o.status!=='angenommen')o.status='angenommen';
+      drawEditor();
+      toast('Positionen aus Angebot '+o.number+' übernommen, bitte prüfen');
+    }
+  }catch(e){console.warn(e);}
+  return r;
+};
+/* Direkt Angebot → Rechnung: Auftrag mitverknüpfen, damit er als abgerechnet gilt */
+const _offerToInvoice54=offerToInvoice;
+offerToInvoice=function(id){
+  const o=db.offers.find(x=>x.id===id),j=offJob(o);
+  const r=_offerToInvoice54.apply(this,arguments);
+  try{if(j){const inv=db.invoices.filter(i=>i.fromOffer===o.number&&i.draft).pop();if(inv&&!inv.jobId){inv.jobId=j.id;saveQuiet();}}}catch(e){console.warn(e);}
+  return r;
+};
+/* Angebotsansicht: „Als Auftrag einplanen“ und Status-Kette */
+const _viewDoc54=viewDoc;
+viewDoc=function(type,id){
+  const r=_viewDoc54.apply(this,arguments);
+  try{
+    if(type==='offer'){
+      const o=db.offers.find(x=>x.id===id),j=offJob(o);
+      const sh=[...document.querySelectorAll('.sheet')].pop();
+      const b=sh&&sh.querySelector('button[onclick^="offerToInvoice"]');
+      if(o&&b){
+        const n=document.createElement('button');n.className='btn full'+(j?'':' pri');n.style.marginTop='8px';n.id='o_job';
+        n.textContent=j?'Zum Auftrag ('+dDE(j.date)+') ›':'Als Auftrag einplanen';
+        n.onclick=()=>offerToJob(o.id);
+        if(!j){b.classList.remove('pri');b.before(n);n.style.marginTop='10px';b.style.marginTop='8px';}else b.after(n);
+        if(j){const k=document.createElement('div');k.innerHTML=ketteHtml(jobKette(j));b.parentNode.insertBefore(k.firstChild,b);}
+      }
+    }
+  }catch(e){console.warn(e);}
+  return r;
+};
+/* Auftragsansicht: Status-Kette, Angebot und Rechnung */
+const _drawJob54=drawJob;
+drawJob=function(){
+  const r=_drawJob54.apply(this,arguments);
+  try{
+    const j=curJob,box=curJobEl&&curJobEl.querySelector('#jb');
+    if(j&&box&&!j._new){
+      const o=j.offerId&&db.offers.find(x=>x.id===j.offerId),re=jobRe(j);
+      const d=document.createElement('div');d.className='card';d.id='j_kette';
+      d.innerHTML=`<div class="lbl">Ablauf</div>${ketteHtml(jobKette(j))}
+        <div class="grid2" style="margin-top:10px">
+          ${o?`<button class="btn sm" onclick="closeSheets();viewDoc('offer','${o.id}')">Angebot ${esc(o.number)}</button>`:''}
+          ${re?`<button class="btn sm" onclick="closeSheets();viewDoc('invoice','${re.id}')">${re.draft?'Rechnungsentwurf':'Rechnung '+esc(re.number)}</button>`
+            :jStat(j)==='erledigt'?`<button class="btn sm pri" onclick="closeSheets();jobZuRechnung('${j.id}')">Rechnung schreiben</button>`:''}
+        </div>`;
+      box.insertBefore(d,box.firstChild);
+    }
+  }catch(e){console.warn(e);}
+  return r;
+};
 
 /* ---------- Start ---------- */
 document.getElementById('hlogo').src=db.settings.company.logo||LOGO_MARK;
