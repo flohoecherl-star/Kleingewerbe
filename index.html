@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Garten Flo · Büro</title>
-<meta name="theme-color" content="#f2f6ef">
+<meta name="theme-color" content="#1F3D2B">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Büro">
@@ -1228,6 +1228,78 @@ header.top .sub{text-transform:none;letter-spacing:0;font-size:13px}
 input[type=date],input[type=time]{min-width:0;width:100%}
 :root[data-theme="dark"],:root[data-theme="light"]{--display:'Cormorant Garamond',Georgia,'Times New Roman',serif;--body:'Figtree',system-ui,-apple-system,'Segoe UI',sans-serif;--label:'Montserrat','Figtree',system-ui,sans-serif;--r:14px}
 
+/* =====================================================================
+   VERSION 5.3 — Design „Waldgrün“
+   Waldgrün, Moos, Salbei, Warmweiß, Beige, Anthrazit. Orange, Blau, Rot
+   nur für Status. Keine Verläufe, keine Schatten. Am Mac Seitenleiste.
+   ===================================================================== */
+:root,:root[data-theme="light"]{
+  --bg:#FAF8F3; --surface:#FFFFFF; --surface2:#F3EFE6; --line:#E4E0D5; --line-h:#D5D0C3;
+  --txt:#2B2F2C; --mut:#5E665F; --dim:#6F766F;
+  --accent:#2F5D3A; --accent-ink:#FFFFFF; --accent-text:#2F5D3A; --accent-bg:#E3EBDD;
+  --grad:#2F5D3A; --moss:#2E7D4F; --moss-d:#2F5D3A; --clay:#8A5212; --red:#B23A2E; --blue:#2E5A86;
+  --hdr-fade:rgba(250,248,243,.92); --card-a:#FFFFFF; --card-b:#FFFFFF;
+  --input:#FBFAF6; --input-f:#FFFFFF; --tabbar:rgba(255,255,255,.97); --on-acc:#FFFFFF;
+  --acc-a:#2F5D3A; --acc-b:#2F5D3A; --acc-glow:transparent;
+  --moss-bg:#E0F0E5; --blue-bg:#E1EAF3; --red-bg:#F8E3DF; --clay-bg:#F6EAD9;
+  --warn-bg:#F6EAD9; --warn-line:#E8CFA8; --warn-txt:#6E4508; --info-bg:#E1EAF3; --info-line:#BCD0E3; --info-txt:#1E4468;
+  --grid:#EAE5DA; --chart-a:#2F5D3A; --chart-b:#C9A46A; --shadow:0 0 0 transparent;
+  --forest:#1F3D2B; --forest-ink:#F4F1E8; --forest-mut:#C9D6C3; --sage:#A8BBA0; --beige:#EFE9DD;
+}
+:root[data-theme="dark"]{
+  --bg:#0F1A14; --surface:#1A2A20; --surface2:#203328; --line:#2A3F31; --line-h:#35503D;
+  --txt:#E8ECE6; --mut:#A9B8A6; --dim:#93A291;
+  --accent:#8BC273; --accent-ink:#0F1A14; --accent-text:#9CCB86; --accent-bg:rgba(139,194,115,.15);
+  --grad:#8BC273; --moss:#7FCB8F; --moss-d:#8BC273; --clay:#E9A65F; --red:#F08A7E; --blue:#8DB8E0;
+  --hdr-fade:rgba(15,26,20,.92); --card-a:#1A2A20; --card-b:#1A2A20;
+  --input:#14231A; --input-f:#1A2A20; --tabbar:rgba(20,34,25,.97); --on-acc:#0F1A14;
+  --acc-a:#8BC273; --acc-b:#8BC273; --acc-glow:transparent;
+  --grid:#24372B; --chart-a:#8BC273; --chart-b:#E9A65F; --shadow:0 0 0 transparent;
+  --forest:#16271D; --forest-ink:#E8ECE6; --forest-mut:#A9B8A6; --sage:#5C7A5A; --beige:#203328;
+}
+.card,.kpi,.tile{border-radius:16px}
+.btn.pri,.btn.full.pri,.btn.sm.pri{background:var(--accent);box-shadow:none}
+.fab{background:var(--accent);box-shadow:none}
+
+/* Kopf in Waldgrün */
+header.top{background:var(--forest)!important;border-bottom:1px solid transparent}
+header.top .ttl{color:var(--forest-ink)}
+header.top .sub{color:var(--forest-mut)}
+header.top .btn.ib{width:44px;height:44px;background:rgba(244,241,232,.07);border-color:rgba(244,241,232,.2);color:var(--forest-ink)}
+header.top .btn.ib .ic{stroke:currentColor}
+
+/* Kennzahl-Kacheln */
+.kz{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0 6px}
+.kz button{all:unset;box-sizing:border-box;cursor:pointer;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.kz button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.kz .l{font-size:12.5px;font-weight:600;color:var(--mut)}
+.kz .v{font-size:23px;font-weight:800;letter-spacing:-.01em;color:var(--txt);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kz .s{font-size:12.5px;font-weight:600;color:var(--mut)}
+.kz .s.gut{color:var(--moss)} .kz .s.schlecht{color:var(--red)} .kz .s.hinweis{color:var(--clay)}
+
+/* Untere Leiste: Plus in der Mitte */
+.fab{display:none!important}
+.tabbar button.tplus{flex:0 0 64px;color:var(--accent-ink)}
+.tabbar button.tplus span{width:52px;height:52px;border-radius:26px;background:var(--accent);display:grid;place-items:center;margin-top:-14px}
+.tabbar button.tplus svg{width:26px;height:26px;padding:0;background:none!important;stroke-width:2.2;transform:none!important}
+.tabbar button.tplus::before{display:none}
+
+/* Mac und Tablet quer: Seitenleiste */
+@media (min-width:1024px){
+  body{padding-left:232px}
+  .wrap{max-width:1100px;padding:0 32px}
+  .tabbar{top:0;bottom:0;left:0;right:auto;transform:none;border-radius:0;box-shadow:none;width:232px;flex-direction:column;justify-content:flex-start;gap:2px;padding:24px 14px;background:var(--forest);backdrop-filter:none;border-top:0;border-right:1px solid var(--line)}
+  .tabbar::before{order:-2;content:'Garten Flo';font-family:var(--display);font-size:28px;font-weight:700;color:var(--forest-ink);padding:0 12px 18px}
+  .tabbar button{flex:0 0 auto;flex-direction:row;justify-content:flex-start;gap:12px;padding:11px 12px;border-radius:10px;font-size:15px;font-weight:600;color:var(--forest-mut)}
+  .tabbar button.on{color:var(--forest-ink);background:rgba(244,241,232,.12)}
+  .tabbar button .bdg{position:static;margin-left:auto;order:3}
+  .tabbar button.tplus{order:-1;flex:0 0 auto;margin-bottom:14px;background:var(--accent);color:var(--accent-ink);justify-content:center;font-weight:700}
+  .tabbar button.tplus span{width:auto;height:auto;background:none;margin:0;display:inline}
+  .tabbar button.tplus svg{width:20px;height:20px}
+  .tabbar button svg{width:22px;height:22px;padding:0;background:none!important;transform:none!important;color:inherit!important}
+  .kz{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+  .kz .v{font-size:27px}
+}
 </style>
 <script>
 /* Farbschema vor dem ersten Zeichnen setzen, damit nichts aufblitzt */
@@ -7878,7 +7950,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.2.0';
+const APP_VERSION5='5.3.0';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -10730,6 +10802,53 @@ vMehr=function(){
   return h.replace('<div class="mgrp">Einstellungen</div>\n  <div class="v5list">','<div class="mgrp">Einstellungen</div>\n  <div class="v5list">'+row);
 };
 if(pinCfg())pinLock();
+
+/* =====================================================================
+   VERSION 5.3 – Design „Waldgrün“: Kennzahlen auf Heute, Plus in der
+   Leiste, Statusleisten-Farbe passend zum grünen Kopf
+   ===================================================================== */
+function kzKacheln(){
+  const t=today(),cy=+t.slice(0,4),cm=+t.slice(5,7),vm=cm===1?12:cm-1,vy=cm===1?cy-1:cy;
+  const ein=incomeIn(cy,cm),einV=incomeIn(vy,vm);
+  const diff=einV>0?Math.round((ein-einV)/einV*100):null;
+  const open=db.invoices.filter(i=>['offen','faellig','teilbezahlt'].includes(statusOf(i)));
+  const over=open.filter(i=>statusOf(i)==='faellig');
+  const ohneRe=db.jobs.filter(j=>jStat(j)==='erledigt'&&j.customerId&&!j.invoiceId&&+j.preis>0&&j.date>=addDays(t,-60)&&!db.invoices.some(i=>i.jobId===j.id));
+  const fm=(db.fahrten||[]).filter(f=>String(f.date||'').slice(0,7)===t.slice(0,7));
+  const km=Math.round(sum(fm,f=>+f.km||0));
+  const k=(l,v,s,cls,fn,aria)=>`<button onclick="${fn}" aria-label="${esc(aria)}"><span class="l">${l}</span><span class="v">${v}</span><span class="s ${cls}">${s}</span></button>`;
+  return `<div class="kz">`
+    +k(`Eingegangen ${MKURZ[cm-1]}`,eur(ein).replace(',00 €',' €'),
+       diff===null?(einV?'':`${MKURZ[vm-1]}: 0 €`):`${diff>=0?'+':'−'} ${Math.abs(diff)} % zum ${MKURZ[vm-1]}`,
+       diff===null?'':diff>=0?'gut':'schlecht',"go('geld')",'Zahlungseingänge diesen Monat')
+    +k('Offene Rechnungen',open.length?eur(sum(open,i=>offenOf(i))).replace(',00 €',' €'):'keine',
+       open.length?`${open.length} offen${over.length?` · ${over.length} überfällig`:''}`:'alles bezahlt',
+       over.length?'schlecht':'gut',"fInv='offen';go('inv')",'Offene Rechnungen anzeigen')
+    +k('Nicht abgerechnet',ohneRe.length?`${ohneRe.length} Auftr${ohneRe.length>1?'äge':'ag'}`:'keine',
+       ohneRe.length?`ca. ${eur(sum(ohneRe,j=>+j.preis||0)).replace(',00 €',' €')} offen`:'alles abgerechnet',
+       ohneRe.length?'hinweis':'gut',"planMode='liste';fJob='erledigt';go('jobs')",'Erledigte Aufträge ohne Rechnung')
+    +k(`Gefahren ${MKURZ[cm-1]}`,`${nf.format(km).replace(',00','')} km`,
+       `${fm.length} Fahrt${fm.length===1?'':'en'}`,'',"go('fahrten')",'Fahrten diesen Monat')
+    +`</div>`;
+}
+const _vHeute53=vHeute;
+vHeute=function(){return kzKacheln()+_vHeute53.apply(this,arguments);};
+
+const _drawTabs53=drawTabs;
+drawTabs=function(){
+  _drawTabs53.apply(this,arguments);
+  const nav=document.getElementById('tabs');if(!nav)return;
+  const b=document.createElement('button');b.className='tplus';b.setAttribute('aria-label','Neu anlegen');
+  b.innerHTML='<span><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>'+(matchMedia('(min-width:1024px)').matches?'Neu':'');
+  b.onclick=()=>fabAction();
+  const ref=nav.children[2]||null;nav.insertBefore(b,ref);
+};
+const _applyTheme53=applyTheme;
+applyTheme=function(m){_applyTheme53.apply(this,arguments);
+  const eff=document.documentElement.getAttribute('data-theme');
+  const mc=document.querySelector('meta[name="theme-color"]');if(mc)mc.content=eff==='light'?'#1F3D2B':'#16271D';
+  const sb=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');if(sb)sb.content='black-translucent';};
+try{matchMedia('(min-width:1024px)').addEventListener('change',()=>drawTabs());}catch(e){}
 
 /* ---------- Start ---------- */
 document.getElementById('hlogo').src=db.settings.company.logo||LOGO_MARK;

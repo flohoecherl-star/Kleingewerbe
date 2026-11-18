@@ -248,4 +248,37 @@ test('Browserspeicher voll: App speichert weiter und lädt aus IndexedDB',async(
   assert.equal(flag,null,'passt wieder in den Browserspeicher → Merker weg');
 });
 
+/* ---------- 5.3: Design Waldgrün ---------- */
+test('Heute zeigt vier Kennzahlen aus echten Daten',async()=>{
+  const r=await ev(()=>{
+    const bak=JSON.stringify({i:db.invoices,j:db.jobs,f:db.fahrten});const t=today();
+    db.invoices=[{id:'k1',number:'RE-1',date:t,dueDate:addDays(t,-1),klein:true,positions:[{qty:1,price:220}],payments:[]},
+      {id:'k2',number:'RE-2',date:t,dueDate:addDays(t,5),klein:true,positions:[{qty:1,price:100}],payments:[{date:t,amount:40}]}];
+    db.jobs=[{id:'kj',customerId:'c',date:t,status:'erledigt',preis:150}];
+    db.fahrten=[{id:'kf',date:t,km:12.4},{id:'kf2',date:t,km:3.6}];
+    const h=kzKacheln();
+    const o=JSON.parse(bak);db.invoices=o.i;db.jobs=o.j;db.fahrten=o.f;
+    return h;
+  });
+  assert.match(r,/Eingegangen/);
+  assert.match(r,/40 €/);                 /* Zahlungseingang */
+  assert.match(r,/280 €/);                /* offen: 220 + 60 */
+  assert.match(r,/1 überfällig/);
+  assert.match(r,/1 Auftrag/);
+  assert.match(r,/16 km/);
+});
+
+test('Plus-Knopf sitzt in der unteren Leiste',async()=>{
+  const r=await ev(()=>{drawTabs();const b=document.querySelector('#tabs .tplus');return {da:!!b,pos:[...document.getElementById('tabs').children].indexOf(b)};});
+  assert.deepEqual(r,{da:true,pos:2});
+});
+
+test('Am Mac steht die Navigation als Seitenleiste links',async()=>{
+  const p2=await browser.newPage({viewport:{width:1400,height:900}});
+  await p2.goto(FILE);await p2.waitForFunction(()=>typeof db==='object');
+  const r=await p2.evaluate(()=>{const s=getComputedStyle(document.getElementById('tabs'));return {left:s.left,w:s.width,dir:s.flexDirection};});
+  await p2.close();
+  assert.deepEqual(r,{left:'0px',w:'232px',dir:'column'});
+});
+
 test('Keine JavaScript-Fehler im ganzen Testlauf',()=>{assert.deepEqual(errors,[]);});
