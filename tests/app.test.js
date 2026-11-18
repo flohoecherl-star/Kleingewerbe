@@ -167,3 +167,85 @@ test('Rechnung als PDF erzeugen ohne Fehler',async()=>{
   assert.equal(r.alt,false,'alter Satz "innerhalb von X Tagen ab Rechnungseingang" darf nicht mehr im PDF stehen');
   assert.equal(r.faellig,1,'Fälligkeitsdatum genau einmal im PDF');
 });
+
+/* ---------- 5.2: Daten sicher ---------- */
+test('Speichern landet zusätzlich in IndexedDB',async()=>{
+  const r=await ev(async()=>{
+    db.customers.push({id:'idbtest1',first:'Ida',last:'Bauer'});
+    const ok=await persistDb();
+    const rec=await idbGet();
+    return {ok,drin:!!rec&&rec.data.includes('idbtest1'),ls:(localStorage.getItem(LS)||'').includes('idbtest1')};
+  });
+  assert.deepEqual(r,{ok:true,drin:true,ls:true});
+});
+
+test('GitHub-Sync verweigert öffentliche Repositories',async()=>{
+  const r=await ev(async()=>{
+    const of=window.fetch;let putGerufen=false;
+    window.fetch=async(url,o)=>{
+      if(/\/repos\/[^/]+\/[^/]+$/.test(url))return new Response(JSON.stringify({private:false}),{status:200});
+      putGerufen=true;return new Response('{}',{status:200});
+    };
+    let msg='';try{await ghPut({owner:'x',repo:'oeffentlich',token:'t',path:'d.json'},{a:1});}catch(e){msg=e.message;}
+    window.fetch=of;return {msg,putGerufen};
+  });
+  assert.match(r.msg,/öffentlich/);
+  assert.equal(r.putGerufen,false);
+});
+
+test('GitHub-Sync erlaubt private Repositories',async()=>{
+  const r=await ev(async()=>{
+    const of=window.fetch;let putGerufen=false;
+    window.fetch=async(url,o)=>{
+      if(/\/repos\/[^/]+\/[^/]+$/.test(url))return new Response(JSON.stringify({private:true}),{status:200});
+      if(o&&o.method==='PUT'){putGerufen=true;return new Response(JSON.stringify({content:{sha:'abc'}}),{status:200});}
+      return new Response('{}',{status:200});
+    };
+    let msg='';try{await ghPut({owner:'x',repo:'privat',token:'t',path:'d.json'},{a:1});}catch(e){msg=e.message;}
+    window.fetch=of;return {msg,putGerufen};
+  });
+  assert.equal(r.putGerufen,true,r.msg);
+});
+
+test('App-Sperre: falsche PIN sperrt weiter, richtige entsperrt',async()=>{
+  const r=await ev(async()=>{
+    const salt='abcd';localStorage.setItem('buero_pin',JSON.stringify({salt,hash:await pinHash('2468',salt),min:5}));
+    pinLock();const da=!!document.getElementById('pinLock');
+    document.getElementById('pinIn').value='1111';document.getElementById('pinGo').click();
+    await new Promise(r=>setTimeout(r,100));
+    const nochDa=!!document.getElementById('pinLock');
+    document.getElementById('pinIn').value='2468';document.getElementById('pinGo').click();
+    await new Promise(r=>setTimeout(r,100));
+    const weg=!document.getElementById('pinLock');
+    const menue=vMehr().includes('App-Sperre');
+    localStorage.removeItem('buero_pin');
+    return {da,nochDa,weg,menue};
+  });
+  assert.deepEqual(r,{da:true,nochDa:true,weg:true,menue:true});
+});
+
+test('Browserspeicher leer: Daten kommen aus IndexedDB zurück',async()=>{
+  await ev(async()=>{db.customers.push({id:'idbtest2',first:'Leo',last:'Leer'});await persistDb();localStorage.removeItem(LS);});
+  await page.reload();
+  await page.waitForFunction(()=>typeof db==='object'&&db.customers.some(c=>c.id==='idbtest2'),null,{timeout:5000});
+  const ls=await ev(async()=>{await new Promise(r=>setTimeout(r,300));return (localStorage.getItem(LS)||'').includes('idbtest2');});
+  assert.equal(ls,true,'nach dem Laden wieder im Browserspeicher');
+});
+
+test('Browserspeicher voll: App speichert weiter und lädt aus IndexedDB',async()=>{
+  const r=await ev(async()=>{
+    const orig=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(k,v){if(k===LS)throw new DOMException('voll','QuotaExceededError');return orig.call(this,k,v);};
+    db.customers.push({id:'idbtest3',first:'Vera',last:'Voll'});
+    const ok=await persistDb();
+    Storage.prototype.setItem=orig;
+    return {ok,flag:localStorage.getItem(LS+'_nurIdb'),lsWeg:localStorage.getItem(LS)===null};
+  });
+  assert.deepEqual(r,{ok:true,flag:'1',lsWeg:true});
+  await page.reload();
+  await page.waitForFunction(()=>typeof db==='object'&&db.customers.some(c=>c.id==='idbtest3'),null,{timeout:5000});
+  const flag=await ev(async()=>{await new Promise(r=>setTimeout(r,300));return localStorage.getItem(LS+'_nurIdb');});
+  assert.equal(flag,null,'passt wieder in den Browserspeicher → Merker weg');
+});
+
+test('Keine JavaScript-Fehler im ganzen Testlauf',()=>{assert.deepEqual(errors,[]);});
