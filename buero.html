@@ -1300,6 +1300,41 @@ header.top .btn.ib .ic{stroke:currentColor}
   .kz{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
   .kz .v{font-size:27px}
 }
+/* ===== VERSION 5.7 — Vorschau-Layout: Heute und Rechnungen ===== */
+.kzband{background:linear-gradient(180deg,var(--forest) 0,var(--forest) 58%,transparent 58%);margin:-2px -16px 4px;padding:2px 16px 0}
+.kzband .kz{margin-top:4px}
+.kzband .kz button{box-shadow:none}
+html[data-theme="dark"] .kzband{background:linear-gradient(180deg,#16271D 0,#16271D 58%,transparent 58%)}
+.n57{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;margin:14px 0 6px;display:flex;flex-direction:column;gap:12px}
+.n57 .hd{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.n57 .k{font-size:12px;font-weight:700;letter-spacing:1.2px;color:var(--accent);text-transform:uppercase}
+.n57 .w{font-size:13px;font-weight:600;color:var(--mut)}
+.n57 .t{font-size:19px;font-weight:700;line-height:1.25;cursor:pointer;color:var(--txt)}
+.n57 .a{font-size:14px;color:var(--mut);margin-top:2px}
+.n57 .bt{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.n57 .bt .btn{min-height:48px;font-size:15px}
+.n57 .mini{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:-2px}
+.n57 .mini button{all:unset;cursor:pointer;font-size:13.5px;font-weight:600;color:var(--accent);padding:4px 0}
+.n57 .mini button[disabled]{opacity:.4;cursor:default}
+.n57 .st{font-size:12.5px;color:var(--mut)}
+.reband{background:var(--forest);color:#F4F1E8;border-radius:16px;padding:16px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:4px 0 12px}
+html[data-theme="dark"] .reband{background:#1A2A20;border:1px solid var(--line)}
+.reband>div{display:flex;flex-direction:column;gap:2px;min-width:0;cursor:pointer}
+.reband .l{font-size:12px;color:#C9D6C3}
+.reband .v{font-size:19px;font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums}
+.reband .v.rot{color:#F3A79C}
+.rem{font-size:12px;font-weight:700;letter-spacing:1.1px;color:var(--mut);text-transform:uppercase;margin:16px 4px 8px;display:flex;justify-content:space-between}
+.rec{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:8px;cursor:pointer;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit}
+.rec.ent{border-style:dashed}
+.rec .g{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.rec .n{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rec .m{font-size:13px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rec .r{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.rec .b{font-size:16px;font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums}
+.sb{font-size:12px;font-weight:700;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.sb.gruen{color:#2E7D4F;background:#E0F0E5}.sb.orange{color:#8A5212;background:#F6EAD9}.sb.blau{color:#2E5A86;background:#E1EAF3}.sb.rot{color:#B23A2E;background:#F8E3DF}.sb.grau{color:#5E665F;background:#EFE9DD}
+html[data-theme="dark"] .sb.gruen{color:#7FCB8F;background:#1F3A27}html[data-theme="dark"] .sb.orange{color:#E9A65F;background:#3A2C18}html[data-theme="dark"] .sb.blau{color:#8DB4DE;background:#1C2C3D}html[data-theme="dark"] .sb.rot{color:#F08A7E;background:#3D1F1B}html[data-theme="dark"] .sb.grau{color:#A9B8A6;background:#24372B}
+@media(min-width:1024px){.kzband{background:none!important;margin:0;padding:0}}
 </style>
 <script>
 /* Farbschema vor dem ersten Zeichnen setzen, damit nichts aufblitzt */
@@ -7950,7 +7985,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.6.1';
+const APP_VERSION5='5.7.0';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -11285,6 +11320,100 @@ vExpenses=function(){
     const m='<button class="btn full" style="margin-top:8px" onclick="openBatch()">';
     return h.includes(m)?h.replace(m,'<button class="btn full" style="margin-top:8px" onclick="erWaehlen()">🧾 E-Rechnung (XML / ZUGFeRD) einlesen</button>\n  '+m):h;
   }catch(e){return h;}
+};
+
+/* =====================================================================
+   VERSION 5.7 — Layout wie in der freigegebenen Vorschau
+   Heute: Kennzahlen auf dem grünen Band, kompakter nächster Einsatz,
+   „Braucht dich“ direkt darunter (Sicherung als Zeile statt großer Karte).
+   Rechnungen: grünes Summenband, Filter mit Anzahl, schlichte Karten.
+   Alle Funktionen bleiben; nur Reihenfolge und Darstellung ändern sich.
+   ===================================================================== */
+function nextCard57(){
+  const t=today();
+  const j=db.jobs.filter(x=>jStat(x)==='geplant'&&x.date>=t).sort(jobSort)[0];
+  if(!j)return `<div class="n57"><div class="hd"><span class="k">Nächster Einsatz</span></div>
+    <div><div class="t" style="cursor:default">Nichts geplant</div><div class="a">Zeit für Angebote, Rechnungen oder den Pflegekalender.</div></div>
+    <div class="bt"><button class="btn pri" onclick="editJob()">Auftrag planen</button><button class="btn" onclick="planMode='pflege';go('jobs')">Pflegekalender</button></div></div>`;
+  const c=j.customerId?cust(j.customerId):null,adr=jobAdresse(j),w=wxDay(j.date),bad=wxBad(w);
+  const tm=timerRun()&&timerRun().jobId===j.id,heute=j.date===t;
+  const wann=heute?'heute':j.date===addDays(t,1)?'morgen':new Date(j.date+'T12:00').toLocaleDateString('de-DE',{weekday:'short',day:'numeric',month:'numeric'});
+  const fahrtOffen=heute&&j.fahrt!==false&&!j.lbId&&!ui.lbRun&&!ui.kmRun&&ui.ohneKm!==j.id;
+  const tel=c&&telOf(c);
+  let haupt,mini=[],schritt='';
+  if(!heute){haupt=`<button class="btn pri" onclick="editJob('${j.id}')">Öffnen</button>`;}
+  else if(fahrtOffen){haupt=`<button class="btn pri" onclick="lbStartFahrt('${j.id}')">Losfahren</button>`;schritt='Schritt 1 von 3 · km-Stand beim Losfahren';
+    mini.push(`<button onclick="ui.ohneKm='${j.id}';uiSave();render()">Ohne km weiter</button>`);}
+  else if(!tm){haupt=`<button class="btn pri" onclick="timerToggle('${j.id}')">Arbeit starten</button>`;schritt='Schritt 2 von 3';
+    mini.push(`<button onclick="jobDone('${j.id}')">Erledigt (Zeit von Hand)</button>`);}
+  else{haupt=`<button class="btn pri" onclick="jobDone('${j.id}')">Erledigt</button>`;schritt='Schritt 3 von 3 · Stoppuhr läuft';
+    mini.push(`<button onclick="timerToggle('${j.id}')">Stoppuhr anhalten</button>`);}
+  if(heute)mini.unshift(`<button onclick="unterwegs('${j.id}')" ${tel?'':'disabled'}>Bin unterwegs</button>`);
+  const sub=[c&&c.id&&j.titel?c.name:'',adr].filter(Boolean).map(esc).join(' · ');
+  const extra=[+j.dauer?'ca. '+nf.format(+j.dauer).replace(',00','')+' Std':'',+j.preis?eur(j.preis):''].filter(Boolean).join(' · ');
+  return `<div class="n57" id="n57">
+    <div class="hd"><span class="k">Nächster Einsatz</span><span class="w">${wann}${j.time?' · '+esc(j.time):''}${w?' · '+wxShort(w):''}</span></div>
+    <div><div class="t" onclick="editJob('${j.id}')">${esc(jobName(j))}</div>${sub?`<div class="a">${sub}</div>`:''}${extra?`<div class="a">${extra}</div>`:''}
+      ${bad?`<div class="a" style="color:var(--red);font-weight:600">${esc(bad)}</div>`:''}</div>
+    <div class="bt">${haupt}<button class="btn" onclick="jobRoute('${j.id}')">Route</button></div>
+    ${mini.length||schritt?`<div class="mini">${mini.join('')}${schritt?`<span class="st" style="margin-left:auto">${schritt}</span>`:''}</div>`:''}
+  </div>`;
+}
+/* Sicherung als Zeile in „Braucht dich“ statt als große Karte ganz oben */
+function brauchtDich57(){
+  let h=brauchtDich();
+  try{
+    const x=extSicherung();
+    if(x.ampel!=='gruen'){
+      const row=`<button class="it s-${x.ampel==='gelb'?'warn':'bad'}" id="b57sich" onclick="${syncReady()?'syncNow()':'vollSicherung()'}"><span class="ico ${x.ampel==='gelb'?'warn':'bad'}">!</span>
+        <div style="min-width:0"><div class="nm">Sicherung außer Haus ${x.tage>900?'fehlt':'vor '+x.tage+' Tagen'}</div><div class="mt">Alles liegt nur auf diesem Gerät. Jetzt sichern</div></div><span class="v5car">›</span></button>`;
+      if(h.includes('<div class="v5list">'))h=h.replace('<div class="v5list">','<div class="v5list">'+row);
+      h=h.replace(/<button class="it s-mut"[\s\S]*?<\/button>/,'');
+      if(h.includes('Alles erledigt.'))h=h.replace(/<div class="it n2"[\s\S]*?<\/div><\/div>\s*<span class="ico ok">[\s\S]*?<\/span><\/div>/,'');
+    }
+  }catch(e){console.warn(e);}
+  return h;
+}
+vHeute=function(){
+  return `<div class="kzband">${kzKacheln()}</div>`+lbRunCard()+nextCard57()+brauchtDich57()+wochenCard()+weekPlan(true)+pflegeHinweis();
+};
+/* Rechnungen */
+const SB57={entwurf:['Entwurf','grau'],offen:['Offen','orange'],faellig:['Überfällig','rot'],teilbezahlt:['Teilweise','blau'],bezahlt:['Bezahlt','gruen'],storniert:['Storniert','grau'],storno:['Storno','grau']};
+function reCard57(d){
+  const st=statusOf(d),[lbl,cls]=SB57[st]||[st,'grau'],c=cust(d.customerId);
+  const was=((d.positions||[]).find(p=>!istAnfahrt(p))||d.positions&&d.positions[0]||{}).desc||'';
+  const bez=paid(d);
+  const info=d.draft?'noch nicht festgeschrieben':st==='bezahlt'?'bezahlt'+((d.payments||[]).length?' '+dDE(d.payments[d.payments.length-1].date).slice(0,6):'')
+    :st==='teilbezahlt'?eur(bez)+' von '+eur(payable(d))+' bezahlt':(st==='storniert'||st==='storno')?dDE(d.date):'fällig '+dDE(d.dueDate).slice(0,6);
+  return `<button class="rec ${d.draft?'ent':''}" onclick="viewDoc('invoice','${d.id}')">
+    <span class="g"><span class="n">${d.draft?'Entwurf':esc(d.number)} · ${esc(c.name||custName(c)||'ohne Kunde')}</span><span class="m">${esc(String(was).split('\n')[0].slice(0,40))}${was?' · ':''}${info}</span></span>
+    <span class="r"><span class="b">${eur(payable(d))}</span><span class="sb ${cls}">${lbl}</span></span></button>`;
+}
+vInvoices=function(){
+  const cy=new Date().getFullYear(),years=yearsOf(db.invoices);
+  const y=yInv==='alle'?cy:+yInv;
+  const istOffen=i=>['offen','faellig','teilbezahlt'].includes(statusOf(i));
+  const open=db.invoices.filter(istOffen),over=open.filter(i=>statusOf(i)==='faellig');
+  const n={alle:db.invoices.length,offen:open.length,faellig:over.length,bezahlt:db.invoices.filter(i=>statusOf(i)==='bezahlt').length,entwurf:db.invoices.filter(i=>i.draft).length};
+  let list=[...db.invoices].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.number||'').localeCompare(a.number||''));
+  if(fInv!=='alle')list=list.filter(i=>fInv==='offen'?istOffen(i):fInv==='entwurf'?i.draft:statusOf(i)===fInv);
+  if(yInv!=='alle')list=list.filter(i=>(i.date||'').slice(0,4)===yInv);
+  /* nach Monat gliedern, flach */
+  let html='',mon='';
+  list.forEach(d=>{const m=(d.date||'').slice(0,7);
+    if(m!==mon){mon=m;const im=list.filter(x=>(x.date||'').slice(0,7)===m);
+      html+=`<div class="rem"><span>${MONTHS[+m.slice(5,7)-1]||''} ${m.slice(0,4)}</span><span>${eur(sum(im,x=>payable(x)))}</span></div>`;}
+    html+=reCard57(d);});
+  const F={alle:'Alle',offen:'Offen',faellig:'Fällig',bezahlt:'Bezahlt',entwurf:'Entwurf'};
+  return `${docSeg()}
+  <div class="reband" id="reband">
+    <div onclick="setFInv('offen')"><span class="l">Offen</span><span class="v">${eur(sum(open,i=>offenOf(i))).replace(',00 €',' €')}</span></div>
+    <div onclick="setFInv('faellig')"><span class="l">Überfällig</span><span class="v ${over.length?'rot':''}">${eur(sum(over,i=>offenOf(i))).replace(',00 €',' €')}</span></div>
+    <div onclick="setFInv('bezahlt')"><span class="l">Bezahlt ${y}</span><span class="v">${eur(incomeIn(y,null)).replace(',00 €',' €')}</span></div>
+  </div>
+  <div class="seg">${Object.keys(F).map(f=>`<button class="${fInv===f?'on':''}" onclick="setFInv('${f}')">${F[f]}${(f==='offen'||f==='faellig'||f==='entwurf')&&n[f]?' '+n[f]:''}</button>`).join('')}</div>
+  ${years.length>1?chips(['alle',...years],yInv,'setYInv',{alle:'Alle Jahre'}):''}
+  ${list.length?html:'<div class="card"><div class="empty">Keine Rechnungen in dieser Ansicht.<br>Mit + neu anlegen.</div></div>'}`;
 };
 
 /* ---------- Start ---------- */
