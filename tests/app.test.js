@@ -333,4 +333,53 @@ test('Auftrag mit Rechnungsentwurf öffnet den Entwurf statt einen zweiten anzul
   assert.deepEqual(r,{gleich:true,offen:'ai2'});
 });
 
+/* ---------- 5.5: Auswertungen ---------- */
+test('Auswertungen: Umsatz nach Kunde und Leistung, ohne Stornos und doppelte Abschläge',async()=>{
+  const r=await ev(()=>{
+    const bak=JSON.stringify({c:db.customers,i:db.invoices,it:db.items});
+    const y=+today().slice(0,4),d=y+'-03-10';
+    db.customers.push({id:'wk1',name:'Huber',first:'Hans',last:'Huber'},{id:'wk2',name:'Wagner',first:'Eva',last:'Wagner'});
+    db.items.push({id:'wi1',name:'Heckenschnitt',unit:'Std',price:45});
+    const R=(id,c,pos,x)=>Object.assign({id,number:'T-'+id,customerId:c,date:d,deliveryDate:d,klein:true,positions:pos,payments:[]},x||{});
+    db.invoices.push(
+      R('w1','wk1',[{desc:'Heckenschnitt Thuja',qty:4,unit:'Std',price:45},{desc:'An- und Abfahrt inkl. Verschleiß und Betriebskosten',qty:1,unit:'Pauschal',price:55}]),
+      R('w2','wk2',[{desc:'Heckenschnitt',qty:2,unit:'Std',price:45}]),
+      R('w3','wk2',[{desc:'Rasen mähen, Kanten',qty:1,unit:'pauschal',price:100}],{storniertDurch:'w4'}),
+      R('w4','wk2',[{desc:'Rasen mähen, Kanten',qty:1,unit:'pauschal',price:-100}],{stornoVon:'w3'}),
+      R('w5','wk1',[{desc:'Abschlag Pflasterarbeiten',qty:1,unit:'pauschal',price:500}],{art:'abschlag',verrechnetIn:'w6'}),
+      R('w6','wk1',[{desc:'Pflasterarbeiten',qty:1,unit:'pauschal',price:1200}],{art:'schluss',abzuege:[{gross:500}]}),
+      R('w7','wk1',[{desc:'Entwurf',qty:1,unit:'pauschal',price:999}],{draft:true}));
+    const k=awNachKunde(y).filter(x=>['wk1','wk2'].includes(x.c.id)).map(x=>[x.c.id,x.umsatz,x.n]);
+    const l=Object.fromEntries(awNachLeistung(y).map(x=>[x.name,x.umsatz]));
+    yGeld=y;const geld=vGeld().includes('openAusw(yGeld)');
+    openAusw(y);const html=(document.getElementById('awbody')||{}).textContent||'';closeSheets();
+    const b=JSON.parse(bak);db.customers=b.c;db.invoices=b.i;db.items=b.it;
+    return {k,l,geld,html};
+  });
+  assert.deepEqual(r.k,[['wk1',1435,2],['wk2',90,1]]);
+  assert.equal(r.l['Heckenschnitt'],270);
+  assert.equal(r.l['An- und Abfahrt'],55);
+  assert.equal(r.l['Pflasterarbeiten'],1200);
+  assert.equal(r.l['Rasen mähen'],undefined);
+  assert.equal(r.l['Abschlag Pflasterarbeiten'],undefined);
+  assert.ok(r.geld,'Eintrag unter Geld');
+  assert.match(r.html,/Umsatz nach Kunde/);
+  assert.match(r.html,/Gewinn laut EÜR/);
+  assert.match(r.html,/Huber/);
+});
+
+test('Auswertungen: Vergleich mit gleichem Zeitraum im Vorjahr',async()=>{
+  const r=await ev(()=>{
+    const bak=JSON.stringify(db.invoices);
+    const t=today(),y=+t.slice(0,4),morgen=addDays(t,1);
+    const R=(id,d,p)=>({id,number:id,customerId:'',date:d,deliveryDate:d,klein:true,positions:[{qty:1,price:p}],payments:[]});
+    db.invoices=[R('v1',(y-1)+'-01-01',100),R('v3',y+'-01-01',150)];
+    /* nach dem heutigen Tag im Vorjahr: darf nicht mitzählen */
+    if(morgen.slice(0,4)===String(y))db.invoices.push(R('v2',(y-1)+'-'+morgen.slice(5),900));
+    const v=awVergleich(y);db.invoices=JSON.parse(bak);
+    return {lauf:v.lauf,vor:v.vor,pj:v.pj};
+  });
+  assert.deepEqual(r,{lauf:150,vor:100,pj:50});
+});
+
 test('Keine JavaScript-Fehler im ganzen Testlauf',()=>{assert.deepEqual(errors,[]);});
