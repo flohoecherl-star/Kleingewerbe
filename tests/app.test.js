@@ -484,3 +484,53 @@ test('Heute: Kennzahlen-Band, kompakter Einsatz, Braucht dich; Rechnungen: Summe
 });
 
 test('Keine JavaScript-Fehler im ganzen Testlauf',()=>{assert.deepEqual(errors,[]);});
+
+/* ---------- 5.8: Freie, mehrzeilige Anschrift ---------- */
+test('Freie Anschrift: Kunde, Beleg-Überschreibung, Entwurf mit altem empf, Festschreiben',async()=>{
+  const r=await ev(async()=>{
+    const bak=JSON.stringify({c:db.customers,i:db.invoices});
+    const frei='WEG Rathsbergerstraße 15a\nvertr. d. CC Bau-Consulting GmbH\nErlenstegenstraße 54\n90491 Nürnberg\nDeutschland';
+    db.customers=[{id:'k1',company:'WEG Rathsbergerstraße 15a',street:'Rathsbergerstraße 15a',zip:'91054',city:'Erlangen',country:'Deutschland'},
+                  {id:'k2',first:'Anna',last:'Meier',street:'Weg 1',zip:'91085',city:'Weisendorf'}];
+    const out={};
+    out.std=addrLines(db.customers[1]);
+    db.customers[0].anschrift=frei;
+    out.kunde=addrLines(db.customers[0]);
+    /* Entwurf, kopiert aus festgeschriebener Rechnung: altes empf darf nicht gewinnen */
+    const d={id:'p2',number:'RE-99003',customerId:'k2',date:'2026-11-26',deliveryDate:'2026-11-26',dueDate:'2026-12-03',
+      klein:true,vat:19,positions:[{desc:'Heckenschnitt',unit:'Std.',qty:1,price:40}],payments:[],draft:true,empf:['Alt']};
+    db.invoices=[d];
+    out.entwurf=empfOf(d);
+    d.empfFrei=frei;
+    out.beleg=empfOf(d);
+    out.check=reCheckList(d).E.filter(x=>/Anschrift (des Kunden|unvollständig: mind)|Freie Anschrift/.test(x));
+    d.empfFrei='WEG\n90491 Nürnberg';
+    out.checkKurz=reCheckList(d).E.filter(x=>/Anschrift (des Kunden|unvollständig: mind)|Freie Anschrift/.test(x)).length;
+    d.empfFrei=frei;
+    const Orig=window.jspdf.jsPDF,texte=[];
+    window.jspdf.jsPDF=function(...a){const doc=new Orig(...a),t=doc.text;
+      doc.text=function(x,...r){texte.push(String(x));return t.call(this,x,...r);};return doc;};
+    try{await genPdf('invoice','p2','Rechnung');}catch(e){out.err=String(e.message||e);}
+    window.jspdf.jsPDF=Orig;
+    out.pdf=['vertr. d. CC Bau-Consulting GmbH','Erlenstegenstraße 54','90491 Nürnberg'].every(z=>texte.includes(z));
+    /* Festgeschrieben: eingefroren in d.empf */
+    out.fest=docEmpf(d);d.draft=false;d.empf=docEmpf(d);d.empfFrei='';
+    out.eingefroren=empfOf(d);
+    const o=JSON.parse(bak);db.customers=o.c;db.invoices=o.i;
+    return out;
+  });
+  assert.deepEqual(r.std,['Anna Meier','Weg 1','91085 Weisendorf']);
+  assert.equal(r.kunde.length,5);assert.equal(r.kunde[1],'vertr. d. CC Bau-Consulting GmbH');
+  assert.deepEqual(r.entwurf,['Anna Meier','Weg 1','91085 Weisendorf']);
+  assert.equal(r.beleg[0],'WEG Rathsbergerstraße 15a');assert.equal(r.beleg.length,5);
+  assert.deepEqual(r.check,[]);
+  assert.equal(r.checkKurz,1);
+  assert.equal(r.err,undefined);
+  assert.equal(r.pdf,true);
+  assert.equal(r.eingefroren[1],'vertr. d. CC Bau-Consulting GmbH');
+});
+
+test('Kopie einer Rechnung übernimmt kein eingefrorenes empf und kein Archiv',async()=>{
+  const n=await ev(()=>freshFromDoc({id:'x',empf:['A'],arch:{hash:'h'},finTs:1,positions:[]}));
+  assert.equal(n.empf,undefined);assert.equal(n.arch,undefined);assert.equal(n.finTs,undefined);
+});
