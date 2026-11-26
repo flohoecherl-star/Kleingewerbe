@@ -1445,7 +1445,11 @@ function migCustomer(c){
   c.company=c.company||'';c.first=c.first||'';c.last=c.last||'';
   c.name=custName(c);return c;
 }
-const addrLines=c=>[c.company,`${c.first||''} ${c.last||''}`.trim(),c.street,`${c.zip||''} ${c.city||''}`.trim(),c.country].filter(x=>x&&String(x).trim());
+/* 5.8: freie, mehrzeilige Anschrift (Kunde: c.anschrift, Beleg: d.empfFrei) */
+const freiLines=t=>String(t||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+const docEmpf=d=>{const f=freiLines(d&&d.empfFrei);return f.length?f:addrLines(cust(d&&d.customerId));};
+const empfOf=d=>(d&&!d.draft&&Array.isArray(d.empf)&&d.empf.length)?d.empf:docEmpf(d);
+const addrLines=c=>c&&freiLines(c.anschrift).length?freiLines(c.anschrift):[c.company,`${c.first||''} ${c.last||''}`.trim(),c.street,`${c.zip||''} ${c.city||''}`.trim(),c.country].filter(x=>x&&String(x).trim());
 const sortName=c=>((c.last||c.company||c.name||'')+' '+(c.first||'')).toLowerCase();
 
 /* ===================== Ausgaben: sofort abziehbar vs. \u00fcber Jahre abschreiben ===================== */
@@ -2967,6 +2971,7 @@ function drawEditor(){
     </div>
     <label class="f"><span>Kunde</span>${kundeFeld()}</label>
     <button class="btn sm" onclick="editCustomer(null,cb=>{cur.customerId=cb;drawEditor()})">Neuen Kunden anlegen</button>
+    ${empfEditor()}
     ${isInv?`<div style="margin-top:12px">
       <div class="lbl" style="margin-bottom:6px">Leistungsdatum</div>
       <div class="r3">
@@ -3403,7 +3408,7 @@ function delDoc(type,id){
 function freshFromDoc(src){
   const n=structuredClone(src);
   ['payments','mahnungen','abzuege','deliveryDates'].forEach(k=>n[k]=[]);
-  ['stornoVon','storniertDurch','verrechnetIn','fromOffer','_ts','_kmTry'].forEach(k=>delete n[k]);
+  ['stornoVon','storniertDurch','verrechnetIn','fromOffer','_ts','_kmTry','empf','arch','finTs','altbestand'].forEach(k=>delete n[k]);
   n.art='normal';n.deliveryMode='tag';n.deliveryEnd='';n.hours=0;n.recurring=null;n.draft=false;
   return n;
 }
@@ -3616,6 +3621,8 @@ function editCustomer(id,cb){
     <div class="grid2"><label class="f"><span>PLZ</span><input id="c_zip" value="${esc(c.zip)}" inputmode="numeric"></label>
     <label class="f"><span>Ort</span><input id="c_city" value="${esc(c.city)}"></label></div>
     <label class="f"><span>Land</span><input id="c_country" value="${esc(c.country)}"></label>
+    <label class="f"><span>Anschrift auf Rechnungen (optional, frei)</span><textarea id="c_anschrift" rows="5" placeholder="z. B.&#10;WEG Musterstraße 1&#10;vertr. d. Hausverwaltung GmbH&#10;Hauptstraße 5&#10;90402 Nürnberg">${esc(c.anschrift||'')}</textarea></label>
+    <div class="hint" style="margin-top:-6px;margin-bottom:10px">Jede Zeile wird eine Zeile im Adressfeld (höchstens 9). Leer lassen = Anschrift aus den Feldern oben. Straße, PLZ und Ort oben trotzdem ausfüllen, sie werden für Fahrtstrecke und E-Rechnung gebraucht.</div>
     <label class="row" style="gap:8px;margin-bottom:10px"><input type="checkbox" style="width:auto" id="c_objAktiv" ${c.objAktiv?'checked':''}
       onchange="document.getElementById('objbox').style.display=this.checked?'block':'none'"><span class="hint">Arbeitsort weicht von der Rechnungsadresse ab</span></label>
     <div id="objbox" style="display:${c.objAktiv?'block':'none'}">
@@ -3665,7 +3672,7 @@ function editCustomer(id,cb){
     btn.disabled=false;btn.textContent='Berechnen';
   };
   el.querySelector('#c_save').onclick=()=>{
-    ['anrede','first','last','company','street','zip','city','country','phone','email','number','notes',
+    ['anrede','first','last','company','street','zip','city','country','anschrift','phone','email','number','notes',
      'objStreet','objZip','objCity','leitweg'].forEach(k=>c[k]=el.querySelector('#c_'+k).value.trim());
     c.objAktiv=el.querySelector('#c_objAktiv').checked;
     c.kmRoundtrip=num(el.querySelector('#c_kmRoundtrip').value);
@@ -4124,7 +4131,11 @@ async function genPdf(type,id,kind){
   doc.text(co.name+'  -  '+co.street+'  -  '+co.zip+' '+co.city,L,60);
   doc.setDrawColor(150);doc.setLineWidth(.1);doc.line(L,61.4,L+78,61.4);
   doc.setFontSize(10.5);doc.setTextColor(20);
-  (d.empf||addrLines(c)).forEach((x,i)=>doc.text(String(x||''),L,68+i*5));
+  {const E=empfOf(d).slice(0,9),n=E.length,st=n<=6?5:Math.min(5,29/(n-1));
+   if(n>6)doc.setFontSize(9.5);
+   const fs=doc.getFontSize();
+   E.forEach((x,i)=>{const t=String(x||''),w=doc.getTextWidth(t);
+     if(w>85)doc.setFontSize(Math.max(7,fs*85/w));doc.text(t,L,68+i*st);doc.setFontSize(fs);});}
 
   // Meta-Block rechts
   const MX=122;
@@ -4284,7 +4295,7 @@ function docHTML(d,type,kind){
   <div class="addr">
     <div style="flex:1">
       <div class="sender">${esc(co.name)} &nbsp;-&nbsp; ${esc(co.street)} &nbsp;-&nbsp; ${esc(co.zip)} ${esc(co.city)}</div>
-      <div style="font-size:10.5pt;line-height:1.5">${(d.empf||addrLines(c)).map(esc).join('<br>')}</div>
+      <div style="font-size:10.5pt;line-height:1.5">${empfOf(d).slice(0,9).map(esc).join('<br>')}</div>
     </div>
     <div class="meta">
       <div class="h"><span>${isInv?(d.art==='abschlag'?'Abschlags-Nr.':(d.art==='schluss'?'Schluss-Nr.':'Rechnungs-Nr.')):'Angebots-Nr.'}</span><span>${esc(d.number)}</span></div>
@@ -7985,7 +7996,7 @@ window.addEventListener('online',()=>wxLoad());
    Pflegepläne, Fahrtenbuch mit Kilometerstand, §35a, Unterschrift,
    Bewertungen, Kontoauszug-Abgleich, automatische Sicherung.
    ===================================================================== */
-const APP_VERSION5='5.7.0';
+const APP_VERSION5='5.8.0';
 ['pflegeplaene','logbuch','fahrzeuge'].forEach(k=>{if(!COLLS.includes(k))COLLS.push(k);});
 const pPlaene=()=>{db.pflegeplaene=db.pflegeplaene||[];return db.pflegeplaene;};
 
@@ -10042,7 +10053,7 @@ async function sha256hex(buf){
 async function archivInvoice(d,force){
   if(!d||d.draft||!window.jspdf)return false;
   if(!force&&(await archKeys()).has(d.id))return true;
-  if(!d.empf)d.empf=addrLines(cust(d.customerId));
+  if(!d.empf)d.empf=docEmpf(d);
   let doc;_archBypass=true;
   try{doc=await genPdf('invoice',d.id,'Rechnung');}catch(e){console.warn('Archiv-PDF',e);doc=null;}
   finally{_archBypass=false;}
@@ -10100,7 +10111,7 @@ saveDoc=function(draft){
     if(ex&&!ex.draft){toast('Diese Rechnung ist festgeschrieben und bleibt unverändert');closeSheets();return;}
     if(!draft&&!cur._checked){reCheck();return;}
     delete cur._checked;
-    if(!draft){cur.empf=addrLines(cust(cur.customerId));cur.finTs=Date.now();}
+    if(!draft){cur.empf=docEmpf(cur);delete cur.arch;cur.finTs=Date.now();}
   }
   return _saveDoc51(draft);
 };
@@ -10117,7 +10128,7 @@ function korrigieren(id){
   window[fn]=function(id){
     const d=db.invoices.find(x=>x.id===id),alt=d&&d.number;
     const r=orig.apply(this,arguments);
-    if(d&&d.number!==alt){d.empf=d.empf||addrLines(cust(d.customerId));archivInvoice(d,true).then(()=>saveQuiet());}
+    if(d&&d.number!==alt){d.empf=d.empf||docEmpf(d);archivInvoice(d,true).then(()=>saveQuiet());}
     return r;
   };
 });
@@ -10162,7 +10173,10 @@ function reCheckList(d){
   if(!c.id)E.push('Kein Kunde gewählt.');
   else{
     if(!((c.company||'').trim()||`${c.first||''}${c.last||''}`.trim()))E.push('Name des Kunden fehlt (Vor- und Nachname oder Firma). Ohne ihn steht kein Empfänger auf der Rechnung.');
-    if(!(c.street||'').trim()||!(c.zip||'').trim()||!(c.city||'').trim())E.push('Anschrift des Kunden unvollständig: Straße, PLZ und Ort sind Pflicht.');
+    const fa=freiLines(d.empfFrei).length?freiLines(d.empfFrei):freiLines(c.anschrift);
+    if(fa.length){if(fa.length<3||!fa.some(x=>/^\d{4,5}\s+\S/.test(x)))E.push('Freie Anschrift unvollständig: mindestens Name, Straße und eine Zeile mit PLZ und Ort.');
+      if(fa.length>9)E.push('Freie Anschrift hat mehr als 9 Zeilen, ins Fensterkuvert passen höchstens 9.');}
+    else if(!(c.street||'').trim()||!(c.zip||'').trim()||!(c.city||'').trim())E.push('Anschrift des Kunden unvollständig: Straße, PLZ und Ort sind Pflicht.');
   }
   if(!(co.name||'').trim()||!(co.street||'').trim()||!(co.zip||'').trim()||!(co.city||'').trim())E.push('Deine eigene Anschrift ist unvollständig (Mehr › Firmendaten).');
   if(!(co.taxNumber||'').trim()&&!(co.vatId||'').trim())E.push('Steuernummer fehlt (Mehr › Firmendaten).');
@@ -10199,7 +10213,7 @@ function reCheck(){
       ${W.map(x=>`<div class="hint" style="margin-top:8px;color:var(--clay)"><b>!</b> ${esc(x)}</div>`).join('')}
     </div>
     <div class="card">
-      <div class="kv"><span>Kunde</span><b style="text-align:right">${esc((d.empf||addrLines(c)).join(', ')||'—')}</b></div>
+      <div class="kv"><span>Kunde</span><b style="text-align:right">${esc(empfOf(d).join(', ')||'—')}</b></div>
       <div class="kv"><span>Rechnungsnummer</span><b class="mono">${esc(wasDraft?nk.invPrefix+nk.invNext:d.number)}</b></div>
       <div class="kv"><span>Rechnungsdatum</span><b>${dDE(d.date)}</b></div>
       <div class="kv"><span>${esc(leistungsLabel(d))}</span><b style="text-align:right">${esc(leistungsShort(d))}</b></div>
@@ -10534,7 +10548,7 @@ const _v5Init51=v5Init;
 v5Init=function(){
   try{
     if(!db.settings.v51){
-      db.invoices.forEach(i=>{if(!i.draft&&!i.arch){i.altbestand=true;if(!i.empf)i.empf=addrLines(cust(i.customerId));}});
+      db.invoices.forEach(i=>{if(!i.draft&&!i.arch){i.altbestand=true;if(!i.empf)i.empf=docEmpf(i);}});
       db.settings.v51=Date.now();saveQuiet();
     }
   }catch(e){console.warn(e);}
@@ -11415,6 +11429,42 @@ vInvoices=function(){
   ${years.length>1?chips(['alle',...years],yInv,'setYInv',{alle:'Alle Jahre'}):''}
   ${list.length?html:'<div class="card"><div class="empty">Keine Rechnungen in dieser Ansicht.<br>Mit + neu anlegen.</div></div>'}`;
 };
+
+/* =====================================================================
+   VERSION 5.8 — Freie, mehrzeilige Empfänger-Anschrift
+   Kunde: c.anschrift (Text, eine Zeile je Adresszeile) ersetzt im
+   Adressfeld die Felder Firma/Name/Straße/PLZ/Ort/Land.
+   Beleg: d.empfFrei überschreibt die Kunden-Anschrift nur für diesen
+   Beleg. Beim Festschreiben wird das Ergebnis in d.empf eingefroren.
+   Typischer Fall: WEG, vertreten durch eine Hausverwaltung.
+   ===================================================================== */
+function empfEditor(){
+  if(!cur)return '';
+  const c=cust(cur.customerId),eigen=freiLines(cur.empfFrei).length>0;
+  const kd=addrLines(c);
+  return `<details style="margin-top:12px" ${eigen?'open':''}>
+    <summary class="lbl" style="cursor:pointer">Anschrift auf ${curType==='invoice'?'der Rechnung':'dem Angebot'}${eigen?' (eigene)':''}</summary>
+    <div class="hint" style="margin:6px 0">${eigen?'Diese Anschrift gilt nur für diesen Beleg.':'Aus dem Kunden:<br>'+(kd.map(esc).join('<br>')||'—')}</div>
+    <textarea id="d_empfFrei" rows="6" placeholder="Eigene Anschrift nur für diesen Beleg, eine Zeile je Adresszeile"
+      oninput="cur.empfFrei=this.value">${esc(cur.empfFrei||'')}</textarea>
+    <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">
+      <button class="btn sm" type="button" onclick="empfVomKunden()">Kunden-Anschrift einsetzen</button>
+      ${eigen?`<button class="btn sm" type="button" onclick="cur.empfFrei='';drawEditor()">Zurücksetzen</button>`:''}
+      ${c&&c.id?`<button class="btn sm" type="button" onclick="empfZumKunden()">Beim Kunden speichern</button>`:''}
+    </div>
+  </details>`;
+}
+function empfVomKunden(){
+  if(!cur)return;
+  cur.empfFrei=addrLines(cust(cur.customerId)).join('\n');drawEditor();
+}
+function empfZumKunden(){
+  if(!cur)return;
+  const c=db.customers.find(x=>x.id===cur.customerId),t=(document.getElementById('d_empfFrei')||{}).value??cur.empfFrei;
+  if(!c)return;
+  c.anschrift=String(t||'').trim();cur.empfFrei='';
+  save();drawEditor();toast(c.anschrift?'Anschrift beim Kunden gespeichert':'Freie Anschrift beim Kunden entfernt');
+}
 
 /* ---------- Start ---------- */
 document.getElementById('hlogo').src=db.settings.company.logo||LOGO_MARK;
